@@ -1,0 +1,15 @@
+.DS_Store
+.venv/
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Generated calibration and capture output
+camera_calibration_runs/
+person_framing_runs/
+person_capture.jpg
+
+# Logs and local environment
+*.log
+.env
+.env.*

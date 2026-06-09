@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="430" viewBox="0 0 760 430" font-family="-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif">
+  <rect width="760" height="430" fill="#0f1115"/>
+  <text x="380" y="38" fill="#e8eaed" font-size="22" font-weight="700" text-anchor="middle">Aegis 机型与 variant 对照</text>
+  <text x="380" y="60" fill="#8a93a3" font-size="13" text-anchor="middle">同一套 API，只需选对一个 variant 参数</text>
+
+  <!-- 点足卡片 -->
+  <rect x="60" y="86" width="310" height="300" rx="12" fill="#15233a" stroke="#3aa0ff" stroke-width="1.5"/>
+  <text x="215" y="120" fill="#a9d3ff" font-size="18" font-weight="700" text-anchor="middle">点足</text>
+  <text x="215" y="142" fill="#8a93a3" font-size="12.5" text-anchor="middle">标准点足版 · EDU · Pro · Ultra</text>
+  <!-- 简笔点足狗 -->
+  <g stroke="#a9d3ff" stroke-width="2.4" fill="none">
+    <rect x="170" y="170" width="90" height="34" rx="6"/>
+    <path d="M180 204 V250"/><path d="M250 204 V250"/>
+    <circle cx="180" cy="256" r="5" fill="#a9d3ff"/><circle cx="250" cy="256" r="5" fill="#a9d3ff"/>
+  </g>
+  <text x="215" y="292" fill="#e8eaed" font-size="14" font-weight="600" text-anchor="middle">variant = zsl-1</text>
+  <text x="215" y="318" fill="#c7ccd6" font-size="12.5" text-anchor="middle">12 关节 · 足端橡胶脚垫</text>
+  <text x="215" y="340" fill="#c7ccd6" font-size="12.5" text-anchor="middle">特技：握手 · 跳跃 · 后空翻 · 双腿站立</text>
+  <text x="215" y="366" fill="#7fe9bd" font-size="12" text-anchor="middle">FF_SDK_D1_VARIANT=zsl-1</text>
+
+  <!-- 轮足卡片 -->
+  <rect x="390" y="86" width="310" height="300" rx="12" fill="#1c2230" stroke="#36c08a" stroke-width="1.5"/>
+  <text x="545" y="120" fill="#7fe9bd" font-size="18" font-weight="700" text-anchor="middle">轮足（轮狗）</text>
+  <text x="545" y="142" fill="#8a93a3" font-size="12.5" text-anchor="middle">轮足版 · 默认 variant</text>
+  <!-- 简笔轮足狗 -->
+  <g stroke="#7fe9bd" stroke-width="2.4" fill="none">
+    <rect x="500" y="170" width="90" height="34" rx="6"/>
+    <path d="M510 204 V244"/><path d="M580 204 V244"/>
+    <circle cx="510" cy="252" r="9"/><circle cx="580" cy="252" r="9"/>
+  </g>
+  <text x="545" y="292" fill="#e8eaed" font-size="14" font-weight="600" text-anchor="middle">variant = zsl-1w</text>
+  <text x="545" y="318" fill="#c7ccd6" font-size="12.5" text-anchor="middle">16 关节（含轮）· 足端驱动轮</text>
+  <text x="545" y="340" fill="#c7ccd6" font-size="12.5" text-anchor="middle">特技：爬行模式 + 基础运动</text>
+  <text x="545" y="366" fill="#7fe9bd" font-size="12" text-anchor="middle">FF_SDK_D1_VARIANT=zsl-1w（默认）</text>
+
+  <text x="380" y="414" fill="#6f7888" font-size="12" text-anchor="middle">填错不会损坏机器人：diagnose() 会如实报告哪条链路没起来</text>
+</svg>
