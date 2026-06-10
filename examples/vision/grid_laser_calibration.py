@@ -585,7 +585,7 @@ def build_parser() -> argparse.ArgumentParser:
     def add_grid_args(p: argparse.ArgumentParser) -> None:
         p.add_argument("--grid-rows", type=int, default=12)
         p.add_argument("--grid-cols", type=int, default=7)
-        p.add_argument("--square-size-cm", type=float, default=10.0)
+        p.add_argument("--square-size-cm", type=float, default=15.0)
         p.add_argument("--blue-hue-low", type=int, default=85)
         p.add_argument("--blue-hue-high", type=int, default=135)
         p.add_argument("--min-line-length", type=int, default=80)

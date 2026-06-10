@@ -41,7 +41,7 @@ python3 examples/vision/grid_laser_calibration.py inspect-grid \
   --image test_camera.jpg \
   --grid-rows 12 \
   --grid-cols 7 \
-  --square-size-cm 10
+  --square-size-cm 15
 ```
 
 Good result:
@@ -59,7 +59,7 @@ python3 examples/vision/grid_laser_calibration.py capture-grid \
   --interval-sec 0.1 \
   --grid-rows 12 \
   --grid-cols 7 \
-  --square-size-cm 10
+  --square-size-cm 15
 ```
 
 Saved to:
@@ -77,7 +77,7 @@ python3 examples/vision/grid_laser_calibration.py calibrate \
   --min-accepted 30 \
   --grid-rows 12 \
   --grid-cols 7 \
-  --square-size-cm 10
+  --square-size-cm 15
 ```
 
 ### 4. Capture Laser-Labeled Samples
@@ -90,7 +90,7 @@ python3 examples/vision/grid_laser_calibration.py capture-laser-samples \
   --count 50 \
   --grid-rows 12 \
   --grid-cols 7 \
-  --square-size-cm 10
+  --square-size-cm 15
 ```
 
 Example prompt answer:
@@ -115,7 +115,7 @@ python3 examples/vision/grid_laser_calibration.py calibrate-laser \
   --min-accepted 10 \
   --grid-rows 12 \
   --grid-cols 7 \
-  --square-size-cm 10
+  --square-size-cm 15
 ```
 
 Good output includes:

@@ -191,7 +191,7 @@ Current default:
 ```text
 grid_rows = 12
 grid_cols = 7
-square_size_cm = 10
+square_size_cm = 15
 ```
 
 If your physical grid is different, change the command values.
@@ -205,7 +205,7 @@ python3 examples/vision/grid_laser_calibration.py inspect-grid \
   --image test_camera.jpg \
   --grid-rows 12 \
   --grid-cols 7 \
-  --square-size-cm 10
+  --square-size-cm 15
 ```
 
 Good result:
@@ -239,7 +239,7 @@ python3 examples/vision/grid_laser_calibration.py capture-grid \
   --interval-sec 0.1 \
   --grid-rows 12 \
   --grid-cols 7 \
-  --square-size-cm 10
+  --square-size-cm 15
 ```
 
 Move the dog/camera or grid view enough that the grid appears in different parts
@@ -274,7 +274,7 @@ python3 examples/vision/grid_laser_calibration.py calibrate \
   --min-accepted 30 \
   --grid-rows 12 \
   --grid-cols 7 \
-  --square-size-cm 10
+  --square-size-cm 15
 ```
 
 Good result:
@@ -314,7 +314,7 @@ python3 examples/vision/grid_laser_calibration.py capture-laser-samples \
   --count 50 \
   --grid-rows 12 \
   --grid-cols 7 \
-  --square-size-cm 10
+  --square-size-cm 15
 ```
 
 When prompted:
@@ -367,7 +367,7 @@ python3 examples/vision/grid_laser_calibration.py calibrate-laser \
   --min-accepted 10 \
   --grid-rows 12 \
   --grid-cols 7 \
-  --square-size-cm 10
+  --square-size-cm 15
 ```
 
 Good result:
