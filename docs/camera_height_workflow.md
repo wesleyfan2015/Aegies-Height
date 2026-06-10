@@ -135,7 +135,7 @@ Probe command:
 
 ```bash
 python3 examples/vision/tilt_telemetry_probe.py \
-  --host <robot-ip> \
+  --host 192.168.234.1 \
   --stand \
   --skip-tilt
 ```
@@ -144,7 +144,7 @@ Tiny tilt command:
 
 ```bash
 python3 examples/vision/tilt_telemetry_probe.py \
-  --host <robot-ip> \
+  --host 192.168.234.1 \
   --stand \
   --pitch-vel 0.04 \
   --pitch-seconds 0.5

@@ -26,7 +26,16 @@ test_camera.jpg                          # sample grid image
 
 ## 1. Connect To The Dog
 
-If the dog has WiFi working, connect your laptop to the dog network.
+Known login for this dog:
+
+```bash
+ssh firefly@192.168.234.1
+```
+
+When prompted, enter the robot password provided with the dog.
+
+If the dog has WiFi working, connect your laptop to the dog network and use the
+command above.
 
 If the dog does not have WiFi, use Ethernet:
 
@@ -48,16 +57,17 @@ Look for an address like:
 172.16.x.x
 ```
 
-Then SSH from your laptop:
+If the IP is still `192.168.234.1`, SSH from your laptop:
 
 ```bash
-ssh <user>@<robot-ip>
+ssh firefly@192.168.234.1
 ```
 
-Example:
+If Ethernet gives the dog a different IP, keep the same username and replace the
+IP:
 
 ```bash
-ssh pi@192.168.1.42
+ssh firefly@<robot-ip>
 ```
 
 If SSH is not available, run the same commands directly on the dog with
@@ -81,13 +91,19 @@ cd Aegies-Height
 If the dog does not have GitHub access, copy the folder from your laptop:
 
 ```bash
-scp -r "/Users/agentech/Documents/Faraday Future Robot SDK" <user>@<robot-ip>:~/Aegies-Height
+scp -r "/Users/agentech/Documents/Faraday Future Robot SDK" firefly@192.168.234.1:~/Aegies-Height
+```
+
+If Ethernet gives the dog a different IP:
+
+```bash
+scp -r "/Users/agentech/Documents/Faraday Future Robot SDK" firefly@<robot-ip>:~/Aegies-Height
 ```
 
 Then SSH in and enter the folder:
 
 ```bash
-ssh <user>@<robot-ip>
+ssh firefly@192.168.234.1
 cd ~/Aegies-Height
 ```
 
@@ -419,7 +435,7 @@ Safe no-tilt probe:
 
 ```bash
 python3 examples/vision/tilt_telemetry_probe.py \
-  --host <robot-ip> \
+  --host 192.168.234.1 \
   --stand \
   --skip-tilt
 ```
@@ -428,7 +444,7 @@ Tiny tilt probe:
 
 ```bash
 python3 examples/vision/tilt_telemetry_probe.py \
-  --host <robot-ip> \
+  --host 192.168.234.1 \
   --stand \
   --pitch-vel 0.04 \
   --pitch-seconds 0.5
@@ -438,7 +454,7 @@ Opposite direction:
 
 ```bash
 python3 examples/vision/tilt_telemetry_probe.py \
-  --host <robot-ip> \
+  --host 192.168.234.1 \
   --stand \
   --pitch-vel -0.04 \
   --pitch-seconds 0.5
