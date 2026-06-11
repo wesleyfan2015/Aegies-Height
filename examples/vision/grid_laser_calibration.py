@@ -700,15 +700,14 @@ def capture_grid_reference(args: argparse.Namespace) -> None:
         write_image_or_raise(image_path, image, args.jpeg_quality)
         print(f"grid_reference_source_image={source_path.resolve()}", flush=True)
     else:
-        log_step("grid_reference_open_camera")
-        cap = open_camera(args.rtsp_url)
-        try:
-            log_step("grid_reference_read_camera")
-            cap, image = read_camera_frame(cap, reconnect_url=args.rtsp_url)
-            log_step("grid_reference_frame_read")
-            write_image_or_raise(image_path, image, args.jpeg_quality)
-        finally:
-            cap.release()
+        log_step(f"grid_reference_capture_timeout_sec={args.capture_timeout_sec}")
+        capture_one_frame_with_timeout(
+            rtsp_url=args.rtsp_url,
+            output=image_path,
+            jpeg_quality=args.jpeg_quality,
+            timeout_sec=args.capture_timeout_sec,
+        )
+        log_step("grid_reference_frame_read")
     image = cv2.imread(str(image_path))
     if image is None:
         raise RuntimeError(f"OpenCV could not read captured image: {image_path}")
@@ -1523,6 +1522,7 @@ def build_parser() -> argparse.ArgumentParser:
     reference.add_argument("--output", default="camera_calibration_runs/latest/grid_reference.json")
     reference.add_argument("--image", default=None, help="Use an existing grid image instead of capturing from RTSP.")
     reference.add_argument("--image-output", default="camera_calibration_runs/latest/grid_reference.jpg")
+    reference.add_argument("--capture-timeout-sec", type=float, default=6.0)
     reference.add_argument("--jpeg-quality", type=int, default=92)
     add_grid_args(reference)
     reference.set_defaults(func=capture_grid_reference)
