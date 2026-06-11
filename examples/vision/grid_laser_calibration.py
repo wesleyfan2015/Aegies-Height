@@ -684,11 +684,12 @@ def dot_inside_labeled_box(
     x_lines = [float(value) for value in grid_debug.get("selected_x_lines", [])]
     lower_y_lines = [float(value) for value in grid_debug.get("selected_lower_y_lines", [])]
     top_y_lines = [float(value) for value in grid_debug.get("selected_top_extension_y_lines", [])]
+    top_extension_y_bounds = top_y_lines + lower_y_lines[:1]
     suggested_box = suggested_box_for_dot(
         spec=spec,
         x_lines=x_lines,
         lower_y_lines=lower_y_lines,
-        top_y_lines=top_y_lines,
+        top_y_lines=top_extension_y_bounds,
         dot=dot,
     )
 
@@ -703,10 +704,10 @@ def dot_inside_labeled_box(
         start_index = spec.top_extension_start_col - 1
         left_index = start_index + col - 1
         right_index = left_index + 1
-        if len(x_lines) <= right_index or len(top_y_lines) < row + 1:
+        if len(x_lines) <= right_index or len(top_extension_y_bounds) < row + 1:
             return {"box_check": "unknown", "reason": "missing_top_extension_grid_lines"}
         left, right = x_lines[left_index], x_lines[right_index]
-        top, bottom = top_y_lines[row - 1], top_y_lines[row]
+        top, bottom = top_extension_y_bounds[row - 1], top_extension_y_bounds[row]
     else:
         return {"box_check": "unknown", "reason": f"unsupported_region:{region}"}
 
