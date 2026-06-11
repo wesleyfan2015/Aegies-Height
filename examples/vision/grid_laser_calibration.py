@@ -101,6 +101,28 @@ def load_jsonl(path: Path) -> list[dict[str, object]]:
     return rows
 
 
+def resolve_sample_path(path_text: str, samples_path: Path) -> Path:
+    path = Path(path_text)
+    if path.is_absolute() or path.exists():
+        return path
+
+    samples_dir = samples_path.parent
+    candidate = samples_dir / path
+    if candidate.exists():
+        return candidate
+
+    marker_parts = Path("camera_calibration_runs/latest").parts
+    parts = path.parts
+    for index in range(len(parts) - len(marker_parts) + 1):
+        if parts[index : index + len(marker_parts)] == marker_parts:
+            stripped = Path(*parts[index + len(marker_parts) :])
+            candidate = samples_dir / stripped
+            if candidate.exists():
+                return candidate
+
+    return path
+
+
 def prune_old_files(directory: Path, pattern: str, keep: int) -> None:
     if keep <= 0 or not directory.exists():
         return
@@ -1510,7 +1532,8 @@ def calibrate_from_images(args: argparse.Namespace) -> None:
 def calibrate_from_laser_samples(args: argparse.Namespace) -> None:
     cv2, np = require_cv2_numpy()
     spec = make_grid_spec(args)
-    samples = load_jsonl(Path(args.samples))
+    samples_path = Path(args.samples)
+    samples = load_jsonl(samples_path)
     if not samples:
         raise RuntimeError(f"No laser samples found: {args.samples}")
     cli_grid_reference = load_grid_reference(args.grid_reference)
@@ -1523,15 +1546,21 @@ def calibrate_from_laser_samples(args: argparse.Namespace) -> None:
     image_size: tuple[int, int] | None = None
 
     for sample in samples:
-        image_path = Path(str(sample["image"]))
+        image_path = resolve_sample_path(str(sample["image"]), samples_path)
         image = cv2.imread(str(image_path))
         if image is None:
             rejected.append({"image": str(image_path), "reason": "opencv_read_failed"})
             continue
         height, width = image.shape[:2]
         image_size = (width, height)
-        sample_reference = load_grid_reference(str(sample["grid_reference"])) if sample.get("grid_reference") else None
-        grid_reference = sample_reference or cli_grid_reference
+        sample_reference = (
+            load_grid_reference(str(resolve_sample_path(str(sample["grid_reference"]), samples_path)))
+            if sample.get("grid_reference")
+            else None
+        )
+        # The lights-on reference passed on the command line is the source of truth.
+        # Per-sample paths are only a fallback for older runs without --grid-reference.
+        grid_reference = cli_grid_reference or sample_reference
         if grid_reference is not None:
             grid_points = grid_reference["grid_points"]
             grid_debug = grid_reference["grid_debug"]
@@ -1571,7 +1600,7 @@ def calibrate_from_laser_samples(args: argparse.Namespace) -> None:
             row=row,
             col=col,
         )
-        if box_check.get("box_check") != "inside":
+        if not bool(sample.get("sample_accepted")) and box_check.get("box_check") != "inside":
             rejected.append(
                 {
                     "image": str(image_path),
