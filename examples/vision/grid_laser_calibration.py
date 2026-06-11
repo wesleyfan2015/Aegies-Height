@@ -757,6 +757,9 @@ def capture_laser_samples(args: argparse.Namespace) -> None:
             image_path = output_dir / f"laser_{int(time.time())}_{attempt:04d}.jpg"
             best_attempt: dict[str, object] | None = None
             burst_results: list[dict[str, object]] = []
+            cached_grid_found = False
+            cached_grid_points = None
+            cached_grid_debug: dict[str, object] | None = None
             for burst_index in range(1, args.burst_frames + 1):
                 cap, image = read_camera_frame(cap, reconnect_url=args.rtsp_url)
                 dot, laser_debug = detect_laser_dot(
@@ -766,14 +769,22 @@ def capture_laser_samples(args: argparse.Namespace) -> None:
                     max_area=args.laser_max_area,
                     roi=roi,
                 )
-                grid_found, grid_points, grid_debug = detect_grid_points(
-                    image,
-                    spec,
-                    blue_hue_low=args.blue_hue_low,
-                    blue_hue_high=args.blue_hue_high,
-                    min_line_length=args.min_line_length,
-                    roi=roi,
-                )
+                if cached_grid_debug is None or (not cached_grid_found and burst_index <= args.grid_retry_frames):
+                    grid_found, grid_points, grid_debug = detect_grid_points(
+                        image,
+                        spec,
+                        blue_hue_low=args.blue_hue_low,
+                        blue_hue_high=args.blue_hue_high,
+                        min_line_length=args.min_line_length,
+                        roi=roi,
+                    )
+                    cached_grid_found = grid_found
+                    cached_grid_points = grid_points
+                    cached_grid_debug = grid_debug
+                else:
+                    grid_found = cached_grid_found
+                    grid_points = cached_grid_points
+                    grid_debug = cached_grid_debug
                 box_check = {"box_check": "unknown", "reason": "laser_or_grid_missing"}
                 sample_accepted = False
                 if dot is not None and grid_found:
@@ -1149,6 +1160,7 @@ def build_parser() -> argparse.ArgumentParser:
     laser.add_argument("--debug-preview", default="camera_calibration_runs/latest/latest_laser_debug.jpg")
     laser.add_argument("--burst-frames", type=int, default=5)
     laser.add_argument("--burst-interval-sec", type=float, default=0.08)
+    laser.add_argument("--grid-retry-frames", type=int, default=2)
     laser.add_argument("--jpeg-quality", type=int, default=92)
     add_laser_args(laser)
     add_grid_args(laser)
