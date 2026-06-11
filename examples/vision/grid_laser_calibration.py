@@ -470,9 +470,24 @@ def detect_laser_dot(
     color: str,
     min_area: float,
     max_area: float,
+    roi: tuple[int, int, int, int] | None = None,
 ) -> tuple[LaserDot | None, dict[str, object]]:
     cv2, np = require_cv2_numpy()
-    hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+    working = image
+    offset_x = 0
+    offset_y = 0
+    if roi is not None:
+        x, y, width, height = roi
+        image_height, image_width = image.shape[:2]
+        x2 = min(image_width, x + width)
+        y2 = min(image_height, y + height)
+        if x < 0 or y < 0 or x >= image_width or y >= image_height or x2 <= x or y2 <= y:
+            return None, {"reason": "roi_out_of_image", "roi": roi}
+        working = image[y:y2, x:x2]
+        offset_x = x
+        offset_y = y
+
+    hsv = cv2.cvtColor(working, cv2.COLOR_BGR2HSV)
     if color == "red":
         mask1 = cv2.inRange(hsv, np.array([0, 90, 120]), np.array([12, 255, 255]))
         mask2 = cv2.inRange(hsv, np.array([168, 90, 120]), np.array([179, 255, 255]))
@@ -498,12 +513,17 @@ def detect_laser_dot(
         x_int = max(0, min(mask.shape[1] - 1, int(round(x))))
         y_int = max(0, min(mask.shape[0] - 1, int(round(y))))
         brightness = float(hsv[y_int, x_int, 2])
-        candidates.append((brightness * area, LaserDot(x=x, y=y, radius=float(radius), area=area)))
+        candidates.append(
+            (
+                brightness * area,
+                LaserDot(x=x + offset_x, y=y + offset_y, radius=float(radius), area=area),
+            )
+        )
 
     if not candidates:
-        return None, {"reason": "laser_not_detected", "contours": len(contours)}
+        return None, {"reason": "laser_not_detected", "contours": len(contours), "roi": roi}
     _, dot = max(candidates, key=lambda item: item[0])
-    return dot, {"laser_candidates": len(candidates)}
+    return dot, {"laser_candidates": len(candidates), "roi": roi}
 
 
 def inspect_grid(args: argparse.Namespace) -> None:
@@ -608,6 +628,7 @@ def capture_laser_samples(args: argparse.Namespace) -> None:
         )
     print("lower_box_labels_are=1_based_from_top_left_like_1,1")
     print("top_extension_labels_are=Trow,col_like_T1,1")
+    roi = parse_roi(args.roi)
 
     accepted_count = 0
     attempt = 0
@@ -636,6 +657,7 @@ def capture_laser_samples(args: argparse.Namespace) -> None:
                 color=args.laser_color,
                 min_area=args.laser_min_area,
                 max_area=args.laser_max_area,
+                roi=roi,
             )
             grid_found, grid_points, grid_debug = detect_grid_points(
                 image,
@@ -643,7 +665,7 @@ def capture_laser_samples(args: argparse.Namespace) -> None:
                 blue_hue_low=args.blue_hue_low,
                 blue_hue_high=args.blue_hue_high,
                 min_line_length=args.min_line_length,
-                roi=parse_roi(args.roi),
+                roi=roi,
             )
             box_check = {"box_check": "unknown", "reason": "laser_or_grid_missing"}
             sample_accepted = False
