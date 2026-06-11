@@ -273,6 +273,7 @@ def detect_grid_points(
     blue_hue_low: int,
     blue_hue_high: int,
     min_line_length: int,
+    hough_threshold: int,
     roi: tuple[int, int, int, int] | None = None,
 ):
     cv2, np = require_cv2_numpy()
@@ -301,7 +302,7 @@ def detect_grid_points(
         mask,
         rho=1,
         theta=np.pi / 180.0,
-        threshold=80,
+        threshold=hough_threshold,
         minLineLength=min_line_length,
         maxLineGap=25,
     )
@@ -380,6 +381,7 @@ def detect_grid_points(
         "horizontal_lines": len(selected_y_debug) + len(top_y_debug),
         "raw_vertical_lines": raw_vertical_count,
         "raw_horizontal_lines": raw_horizontal_count,
+        "hough_threshold": hough_threshold,
         "roi": roi,
         "top_extension_y_inferred": spec.shape == "l_shape" and inferred_top,
         "selected_x_lines": [round(value + offset_x, 2) for value in x_lines],
@@ -718,19 +720,12 @@ def capture_grid_reference(args: argparse.Namespace) -> None:
         blue_hue_low=args.blue_hue_low,
         blue_hue_high=args.blue_hue_high,
         min_line_length=args.min_line_length,
+        hough_threshold=args.hough_threshold,
         roi=requested_roi,
     )
     if not found and requested_roi is not None:
         print(f"grid_reference_roi_failed={json.dumps(debug)}")
-        print("grid_reference_retrying_without_roi=true")
-        found, points, debug = detect_grid_points(
-            image,
-            spec,
-            blue_hue_low=args.blue_hue_low,
-            blue_hue_high=args.blue_hue_high,
-            min_line_length=args.min_line_length,
-            roi=None,
-        )
+        print("grid_reference_retrying_without_roi=false")
     if not found or points is None:
         failure_path = output_path.with_name(output_path.stem + "_failed_image.jpg")
         write_image_or_raise(failure_path, image, args.jpeg_quality)
@@ -916,6 +911,7 @@ def inspect_grid(args: argparse.Namespace) -> None:
         blue_hue_low=args.blue_hue_low,
         blue_hue_high=args.blue_hue_high,
         min_line_length=args.min_line_length,
+        hough_threshold=args.hough_threshold,
         roi=parse_roi(args.roi),
     )
     print(f"grid_found={str(found).lower()}")
@@ -957,6 +953,7 @@ def capture_grid(args: argparse.Namespace) -> None:
                 blue_hue_low=args.blue_hue_low,
                 blue_hue_high=args.blue_hue_high,
                 min_line_length=args.min_line_length,
+                hough_threshold=args.hough_threshold,
                 roi=parse_roi(args.roi),
             )
             if found:
@@ -1089,6 +1086,7 @@ def capture_laser_samples(args: argparse.Namespace) -> None:
                         blue_hue_low=args.blue_hue_low,
                         blue_hue_high=args.blue_hue_high,
                         min_line_length=args.min_line_length,
+                        hough_threshold=args.hough_threshold,
                         roi=roi,
                     )
                     cached_grid_found = grid_found
@@ -1270,6 +1268,7 @@ def calibrate_from_images(args: argparse.Namespace) -> None:
             blue_hue_low=args.blue_hue_low,
             blue_hue_high=args.blue_hue_high,
             min_line_length=args.min_line_length,
+            hough_threshold=args.hough_threshold,
             roi=parse_roi(args.roi),
         )
         if not found or points is None:
@@ -1351,6 +1350,7 @@ def calibrate_from_laser_samples(args: argparse.Namespace) -> None:
                 blue_hue_low=args.blue_hue_low,
                 blue_hue_high=args.blue_hue_high,
                 min_line_length=args.min_line_length,
+                hough_threshold=args.hough_threshold,
                 roi=parse_roi(args.roi),
             )
             if not found or grid_points is None:
@@ -1460,7 +1460,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     def add_grid_args(p: argparse.ArgumentParser) -> None:
         p.add_argument("--grid-shape", choices=["rectangle", "l_shape"], default="l_shape")
-        p.add_argument("--grid-rows", type=int, default=9)
+        p.add_argument("--grid-rows", type=int, default=8)
         p.add_argument("--grid-cols", type=int, default=8)
         p.add_argument("--square-size-cm", type=float, default=15.0)
         p.add_argument("--top-extension-rows", type=int, default=4)
@@ -1473,7 +1473,8 @@ def build_parser() -> argparse.ArgumentParser:
         )
         p.add_argument("--blue-hue-low", type=int, default=85)
         p.add_argument("--blue-hue-high", type=int, default=135)
-        p.add_argument("--min-line-length", type=int, default=80)
+        p.add_argument("--min-line-length", type=int, default=25)
+        p.add_argument("--hough-threshold", type=int, default=50)
 
     def add_laser_args(p: argparse.ArgumentParser) -> None:
         p.add_argument("--laser-color", choices=["red", "green"], default="green")
