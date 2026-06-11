@@ -415,9 +415,10 @@ rejects outside samples.
 If the laser is not detected:
 
 - try a darker room
-- use a brighter red/green laser
-- try `--laser-color green`
+- use the green laser; green is now the default in the scripts
 - adjust `--laser-min-area`
+- lower `--laser-min-saturation`
+- lower `--laser-min-value`
 - adjust `--laser-max-area`
 
 ### 5.6 Calibrate With Laser Samples

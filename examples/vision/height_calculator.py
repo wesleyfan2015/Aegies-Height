@@ -733,7 +733,7 @@ def build_parser() -> argparse.ArgumentParser:
         )
 
     def add_laser_args(p: argparse.ArgumentParser) -> None:
-        p.add_argument("--laser-color", choices=["red", "green"], default="red")
+        p.add_argument("--laser-color", choices=["red", "green"], default="green")
         p.add_argument("--laser-min-area", type=float, default=3.0)
         p.add_argument("--laser-max-area", type=float, default=1800.0)
 

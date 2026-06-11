@@ -1212,7 +1212,7 @@ def build_parser() -> argparse.ArgumentParser:
         p.add_argument("--min-line-length", type=int, default=80)
 
     def add_laser_args(p: argparse.ArgumentParser) -> None:
-        p.add_argument("--laser-color", choices=["red", "green"], default="red")
+        p.add_argument("--laser-color", choices=["red", "green"], default="green")
         p.add_argument("--laser-min-area", type=float, default=1.0)
         p.add_argument("--laser-max-area", type=float, default=1800.0)
         p.add_argument("--laser-min-saturation", type=int, default=35)
