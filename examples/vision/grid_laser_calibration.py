@@ -98,6 +98,14 @@ def load_jsonl(path: Path) -> list[dict[str, object]]:
     return rows
 
 
+def prune_old_files(directory: Path, pattern: str, keep: int) -> None:
+    if keep <= 0 or not directory.exists():
+        return
+    files = sorted(directory.glob(pattern), key=lambda path: path.stat().st_mtime, reverse=True)
+    for path in files[keep:]:
+        path.unlink(missing_ok=True)
+
+
 def open_camera(rtsp_url: str):
     cv2, _ = require_cv2_numpy()
     cap = cv2.VideoCapture(rtsp_url, cv2.CAP_FFMPEG)
@@ -723,6 +731,8 @@ def capture_laser_samples(args: argparse.Namespace) -> None:
     preview_path.parent.mkdir(parents=True, exist_ok=True)
     debug_preview_path = Path(args.debug_preview)
     debug_preview_path.parent.mkdir(parents=True, exist_ok=True)
+    debug_attempt_dir = Path(args.debug_attempt_dir)
+    debug_attempt_dir.mkdir(parents=True, exist_ok=True)
     print(f"laser_samples={samples_path}")
     print(f"grid_shape={spec.shape}")
     print(f"lower_grid_boxes={spec.box_rows}x{spec.box_cols}")
@@ -838,13 +848,18 @@ def capture_laser_samples(args: argparse.Namespace) -> None:
             grid_debug = best_attempt["grid_debug"]
             box_check = best_attempt["box_check"]
             sample_accepted = bool(best_attempt["sample_accepted"])
+            raw_attempt_path = debug_attempt_dir / f"attempt_{attempt:04d}_raw.jpg"
+            debug_attempt_path = debug_attempt_dir / f"attempt_{attempt:04d}_debug.jpg"
             cv2.imwrite(str(preview_path), image, [int(cv2.IMWRITE_JPEG_QUALITY), args.jpeg_quality])
+            cv2.imwrite(str(raw_attempt_path), image, [int(cv2.IMWRITE_JPEG_QUALITY), args.jpeg_quality])
             cv2.imwrite(str(image_path), image, [int(cv2.IMWRITE_JPEG_QUALITY), args.jpeg_quality])
             sample = {
                 "created_at": datetime.now().isoformat(timespec="seconds"),
                 "image": str(image_path),
                 "preview": str(preview_path),
                 "debug_preview": str(debug_preview_path),
+                "raw_attempt": str(raw_attempt_path),
+                "debug_attempt": str(debug_attempt_path),
                 "box_region": region,
                 "box_row": row,
                 "box_col": col,
@@ -872,11 +887,22 @@ def capture_laser_samples(args: argparse.Namespace) -> None:
                 box_check=box_check,
                 label=format_box_label(region, row, col),
             )
+            save_debug_overlay(
+                image=image,
+                output=debug_attempt_path,
+                grid_debug=grid_debug,
+                dot=dot,
+                box_check=box_check,
+                label=format_box_label(region, row, col),
+            )
+            prune_old_files(debug_attempt_dir, "attempt_*_raw.jpg", args.keep_debug_attempts)
+            prune_old_files(debug_attempt_dir, "attempt_*_debug.jpg", args.keep_debug_attempts)
             status = "accepted" if sample_accepted else "rejected"
             if sample_accepted or args.save_rejected:
                 append_jsonl(samples_path, sample)
                 print(
                     f"sample_{status}={image_path} preview={preview_path} debug={debug_preview_path} "
+                    f"attempt_debug={debug_attempt_path} "
                     f"box={format_box_label(region, row, col)} "
                     f"accepted_count={accepted_count + int(sample_accepted)}/{args.count} "
                     f"laser_detected={str(dot is not None).lower()} grid_found={str(grid_found).lower()} "
@@ -886,6 +912,7 @@ def capture_laser_samples(args: argparse.Namespace) -> None:
                 image_path.unlink(missing_ok=True)
                 print(
                     f"sample_rejected=not_saved preview={preview_path} debug={debug_preview_path} "
+                    f"attempt_debug={debug_attempt_path} "
                     f"box={format_box_label(region, row, col)} "
                     f"accepted_count={accepted_count}/{args.count} "
                     f"laser_detected={str(dot is not None).lower()} grid_found={str(grid_found).lower()} "
@@ -1158,6 +1185,8 @@ def build_parser() -> argparse.ArgumentParser:
     laser.add_argument("--box-margin-px", type=float, default=12.0)
     laser.add_argument("--preview", default="camera_calibration_runs/latest/latest_laser_attempt.jpg")
     laser.add_argument("--debug-preview", default="camera_calibration_runs/latest/latest_laser_debug.jpg")
+    laser.add_argument("--debug-attempt-dir", default="camera_calibration_runs/latest/debug_attempts")
+    laser.add_argument("--keep-debug-attempts", type=int, default=20)
     laser.add_argument("--burst-frames", type=int, default=5)
     laser.add_argument("--burst-interval-sec", type=float, default=0.08)
     laser.add_argument("--grid-retry-frames", type=int, default=2)
