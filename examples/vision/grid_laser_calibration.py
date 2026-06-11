@@ -599,6 +599,62 @@ def make_grid_spec(args: argparse.Namespace) -> GridSpec:
     )
 
 
+def load_grid_reference(path: str | None):
+    if not path:
+        return None
+    _, np = require_cv2_numpy()
+    data = json.loads(Path(path).read_text(encoding="utf-8"))
+    points = np.asarray(data["grid_points"], dtype=np.float32).reshape(-1, 1, 2)
+    return {
+        "path": path,
+        "grid_debug": data["grid_debug"],
+        "grid_points": points,
+        "image_width": int(data["image_width"]),
+        "image_height": int(data["image_height"]),
+    }
+
+
+def capture_grid_reference(args: argparse.Namespace) -> None:
+    cv2, _ = require_cv2_numpy()
+    spec = make_grid_spec(args)
+    image_path = Path(args.image_output)
+    output_path = Path(args.output)
+    capture_one_frame(rtsp_url=args.rtsp_url, output=image_path, jpeg_quality=args.jpeg_quality)
+    image = cv2.imread(str(image_path))
+    if image is None:
+        raise RuntimeError(f"OpenCV could not read captured image: {image_path}")
+
+    found, points, debug = detect_grid_points(
+        image,
+        spec,
+        blue_hue_low=args.blue_hue_low,
+        blue_hue_high=args.blue_hue_high,
+        min_line_length=args.min_line_length,
+        roi=parse_roi(args.roi),
+    )
+    if not found or points is None:
+        raise RuntimeError(f"Grid reference failed: {json.dumps(debug)}")
+
+    height, width = image.shape[:2]
+    save_json(
+        output_path,
+        {
+            "created_at": datetime.now().isoformat(timespec="seconds"),
+            "source": "grid_reference",
+            "image": str(image_path),
+            "image_width": width,
+            "image_height": height,
+            "grid": spec.as_dict(),
+            "grid_point_count": int(len(points)),
+            "grid_points": points.reshape(-1, 2).tolist(),
+            "grid_debug": debug,
+        },
+    )
+    print(f"grid_reference_saved={output_path.resolve()}")
+    print(f"grid_reference_image={image_path.resolve()}")
+    print(f"grid_found=true point_count={len(points)}")
+
+
 def detect_laser_dot(
     image,
     *,
@@ -781,6 +837,9 @@ def capture_laser_samples(args: argparse.Namespace) -> None:
     print("lower_box_labels_are=1_based_from_top_left_like_1,1")
     print("top_extension_labels_are=Trow,col_like_T1,1")
     roi = parse_roi(args.roi)
+    grid_reference = load_grid_reference(args.grid_reference)
+    if grid_reference is not None:
+        print(f"grid_reference={Path(args.grid_reference).resolve()}")
 
     accepted_count = 0
     attempt = 0
@@ -831,7 +890,14 @@ def capture_laser_samples(args: argparse.Namespace) -> None:
                     f"attempt={attempt} burst={burst_index}/{args.burst_frames} "
                     f"laser_detected={str(dot is not None).lower()}"
                 )
-                if cached_grid_debug is None or (not cached_grid_found and burst_index <= args.grid_retry_frames):
+                if grid_reference is not None:
+                    grid_found = True
+                    grid_points = grid_reference["grid_points"]
+                    grid_debug = grid_reference["grid_debug"]
+                    cached_grid_found = True
+                    cached_grid_points = grid_points
+                    cached_grid_debug = grid_debug
+                elif cached_grid_debug is None or (not cached_grid_found and burst_index <= args.grid_retry_frames):
                     log_step(f"attempt={attempt} burst={burst_index}/{args.burst_frames} grid_detect_start")
                     grid_found, grid_points, grid_debug = detect_grid_points(
                         image,
@@ -929,6 +995,7 @@ def capture_laser_samples(args: argparse.Namespace) -> None:
                 "laser_dot": None if dot is None else asdict(dot),
                 "grid_found": grid_found,
                 "grid_point_count": 0 if grid_points is None else int(len(grid_points)),
+                "grid_reference": None if grid_reference is None else args.grid_reference,
                 "laser_debug": laser_debug,
                 "grid_debug": grid_debug,
                 "box_check": box_check,
@@ -1071,6 +1138,7 @@ def calibrate_from_laser_samples(args: argparse.Namespace) -> None:
     samples = load_jsonl(Path(args.samples))
     if not samples:
         raise RuntimeError(f"No laser samples found: {args.samples}")
+    cli_grid_reference = load_grid_reference(args.grid_reference)
 
     base_object_points = object_points(spec).reshape(-1, 3)
     object_sets = []
@@ -1087,17 +1155,23 @@ def calibrate_from_laser_samples(args: argparse.Namespace) -> None:
             continue
         height, width = image.shape[:2]
         image_size = (width, height)
-        found, grid_points, grid_debug = detect_grid_points(
-            image,
-            spec,
-            blue_hue_low=args.blue_hue_low,
-            blue_hue_high=args.blue_hue_high,
-            min_line_length=args.min_line_length,
-            roi=parse_roi(args.roi),
-        )
-        if not found or grid_points is None:
-            rejected.append({"image": str(image_path), **grid_debug})
-            continue
+        sample_reference = load_grid_reference(str(sample["grid_reference"])) if sample.get("grid_reference") else None
+        grid_reference = sample_reference or cli_grid_reference
+        if grid_reference is not None:
+            grid_points = grid_reference["grid_points"]
+            grid_debug = grid_reference["grid_debug"]
+        else:
+            found, grid_points, grid_debug = detect_grid_points(
+                image,
+                spec,
+                blue_hue_low=args.blue_hue_low,
+                blue_hue_high=args.blue_hue_high,
+                min_line_length=args.min_line_length,
+                roi=parse_roi(args.roi),
+            )
+            if not found or grid_points is None:
+                rejected.append({"image": str(image_path), **grid_debug})
+                continue
         laser_dot = sample.get("laser_dot")
         if not isinstance(laser_dot, dict):
             rejected.append({"image": str(image_path), "reason": "laser_dot_missing"})
@@ -1239,10 +1313,19 @@ def build_parser() -> argparse.ArgumentParser:
     add_grid_args(capture)
     capture.set_defaults(func=capture_grid)
 
+    reference = sub.add_parser("capture-grid-reference", help="Capture one lights-on grid reference for dark laser samples.")
+    reference.add_argument("--rtsp-url", default=DEFAULT_RTSP_URL)
+    reference.add_argument("--output", default="camera_calibration_runs/latest/grid_reference.json")
+    reference.add_argument("--image-output", default="camera_calibration_runs/latest/grid_reference.jpg")
+    reference.add_argument("--jpeg-quality", type=int, default=92)
+    add_grid_args(reference)
+    reference.set_defaults(func=capture_grid_reference)
+
     laser = sub.add_parser("capture-laser-samples", help="Capture laser samples labeled by grid box.")
     laser.add_argument("--rtsp-url", default=DEFAULT_RTSP_URL)
     laser.add_argument("--output-dir", default="camera_calibration_runs/latest/laser_images")
     laser.add_argument("--samples", default="camera_calibration_runs/latest/laser_samples.jsonl")
+    laser.add_argument("--grid-reference", default=None)
     laser.add_argument("--count", type=int, default=50)
     laser.add_argument("--interactive", action="store_true")
     laser.add_argument("--box-region", choices=["lower", "top_extension"], default="lower")
@@ -1274,6 +1357,7 @@ def build_parser() -> argparse.ArgumentParser:
     laser_calibrate = sub.add_parser("calibrate-laser", help="Calibrate from laser-labeled grid samples.")
     laser_calibrate.add_argument("--samples", default="camera_calibration_runs/latest/laser_samples.jsonl")
     laser_calibrate.add_argument("--output", default="camera_calibration_runs/latest/calibration.json")
+    laser_calibrate.add_argument("--grid-reference", default=None)
     laser_calibrate.add_argument("--min-accepted", type=int, default=10)
     laser_calibrate.add_argument("--fix-principal-point", action="store_true")
     add_grid_args(laser_calibrate)

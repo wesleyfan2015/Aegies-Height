@@ -309,7 +309,59 @@ rms_reprojection_error is low
 
 Lower RMS is better. If RMS is high, capture better grid images.
 
-### 5.5 Capture Laser-Labeled Samples
+### 5.5 Recommended: Dark-Room Laser Samples With Lights-On Grid Reference
+
+Use this when the green laser is easier to see in darkness.
+
+Do not move the dog or wall grid between the lights-on and lights-off steps.
+
+First, keep the lights on and capture the grid reference:
+
+```bash
+python3 examples/vision/grid_laser_calibration.py capture-grid-reference \
+  --output camera_calibration_runs/latest/grid_reference.json \
+  --image-output camera_calibration_runs/latest/grid_reference.jpg \
+  --roi 650,380,450,460 \
+  --min-line-length 25
+```
+
+Good result:
+
+```text
+grid_reference_saved=...
+grid_found=true point_count=76
+```
+
+Then turn the lights off, point the green laser into a box, and start dark
+laser capture:
+
+```bash
+python3 examples/vision/grid_laser_calibration.py capture-laser-samples \
+  --interactive \
+  --count 50 \
+  --grid-reference camera_calibration_runs/latest/grid_reference.json \
+  --roi 650,380,450,460 \
+  --box-margin-px 20 \
+  --burst-frames 5 \
+  --burst-interval-sec 0.05 \
+  --grid-retry-frames 1 \
+  --laser-min-area 1 \
+  --laser-min-saturation 6 \
+  --laser-min-value 10
+```
+
+When prompted, type the box where the laser is:
+
+```text
+1,1
+3,5
+T1,1
+```
+
+In this mode the dark image does not need to show the grid. The script uses the
+saved lights-on grid reference and only detects the green laser.
+
+### 5.6 Fallback: Capture Laser-Labeled Samples With Grid Visible
 
 This is the assisted calibration step.
 
@@ -421,7 +473,7 @@ If the laser is not detected:
 - lower `--laser-min-value`
 - adjust `--laser-max-area`
 
-### 5.6 Calibrate With Laser Samples
+### 5.7 Calibrate With Laser Samples
 
 Run:
 
@@ -430,7 +482,8 @@ python3 examples/vision/grid_laser_calibration.py calibrate-laser \
   --samples camera_calibration_runs/latest/laser_samples.jsonl \
   --output camera_calibration_runs/latest/calibration.json \
   --min-accepted 10 \
-  --roi 700,420,320,390 \
+  --grid-reference camera_calibration_runs/latest/grid_reference.json \
+  --roi 650,380,450,460 \
   --min-line-length 25
 ```
 
