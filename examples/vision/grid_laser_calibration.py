@@ -489,11 +489,11 @@ def detect_laser_dot(
 
     hsv = cv2.cvtColor(working, cv2.COLOR_BGR2HSV)
     if color == "red":
-        mask1 = cv2.inRange(hsv, np.array([0, 90, 120]), np.array([12, 255, 255]))
-        mask2 = cv2.inRange(hsv, np.array([168, 90, 120]), np.array([179, 255, 255]))
+        mask1 = cv2.inRange(hsv, np.array([0, 50, 70]), np.array([14, 255, 255]))
+        mask2 = cv2.inRange(hsv, np.array([165, 50, 70]), np.array([179, 255, 255]))
         mask = cv2.bitwise_or(mask1, mask2)
     elif color == "green":
-        mask = cv2.inRange(hsv, np.array([35, 70, 100]), np.array([90, 255, 255]))
+        mask = cv2.inRange(hsv, np.array([35, 40, 60]), np.array([95, 255, 255]))
     else:
         raise ValueError("laser color must be red or green")
 
@@ -522,8 +522,8 @@ def detect_laser_dot(
 
     if not candidates:
         return None, {"reason": "laser_not_detected", "contours": len(contours), "roi": roi}
-    _, dot = max(candidates, key=lambda item: item[0])
-    return dot, {"laser_candidates": len(candidates), "roi": roi}
+    score, dot = max(candidates, key=lambda item: item[0])
+    return dot, {"laser_candidates": len(candidates), "laser_score": round(score, 2), "roi": roi}
 
 
 def inspect_grid(args: argparse.Namespace) -> None:
@@ -649,37 +649,80 @@ def capture_laser_samples(args: argparse.Namespace) -> None:
 
             grid_box_center_object_point(spec=spec, row=row, col=col, region=region)
             image_path = output_dir / f"laser_{int(time.time())}_{attempt:04d}.jpg"
-            cap, image = read_camera_frame(cap, reconnect_url=args.rtsp_url)
+            best_attempt: dict[str, object] | None = None
+            burst_results: list[dict[str, object]] = []
+            for burst_index in range(1, args.burst_frames + 1):
+                cap, image = read_camera_frame(cap, reconnect_url=args.rtsp_url)
+                dot, laser_debug = detect_laser_dot(
+                    image,
+                    color=args.laser_color,
+                    min_area=args.laser_min_area,
+                    max_area=args.laser_max_area,
+                    roi=roi,
+                )
+                grid_found, grid_points, grid_debug = detect_grid_points(
+                    image,
+                    spec,
+                    blue_hue_low=args.blue_hue_low,
+                    blue_hue_high=args.blue_hue_high,
+                    min_line_length=args.min_line_length,
+                    roi=roi,
+                )
+                box_check = {"box_check": "unknown", "reason": "laser_or_grid_missing"}
+                sample_accepted = False
+                if dot is not None and grid_found:
+                    box_check = dot_inside_labeled_box(
+                        spec=spec,
+                        grid_debug=grid_debug,
+                        dot=dot,
+                        region=region,
+                        row=row,
+                        col=col,
+                        margin_px=args.box_margin_px,
+                    )
+                    sample_accepted = box_check.get("box_check") == "inside"
+                result = {
+                    "burst_index": burst_index,
+                    "image": image,
+                    "dot": dot,
+                    "laser_debug": laser_debug,
+                    "grid_found": grid_found,
+                    "grid_points": grid_points,
+                    "grid_debug": grid_debug,
+                    "box_check": box_check,
+                    "sample_accepted": sample_accepted,
+                }
+                burst_results.append(
+                    {
+                        "burst_index": burst_index,
+                        "laser_detected": dot is not None,
+                        "grid_found": grid_found,
+                        "box_check": box_check.get("box_check"),
+                        "laser_debug": laser_debug,
+                    }
+                )
+                score = float(laser_debug.get("laser_score", 0.0)) + (1000000.0 if sample_accepted else 0.0)
+                if best_attempt is None or score > float(best_attempt["score"]):
+                    result["score"] = score
+                    best_attempt = result
+                if sample_accepted:
+                    break
+                if args.burst_interval_sec > 0 and burst_index < args.burst_frames:
+                    time.sleep(args.burst_interval_sec)
+
+            if best_attempt is None:
+                raise RuntimeError("No burst frames were captured.")
+
+            image = best_attempt["image"]
+            dot = best_attempt["dot"]
+            laser_debug = best_attempt["laser_debug"]
+            grid_found = bool(best_attempt["grid_found"])
+            grid_points = best_attempt["grid_points"]
+            grid_debug = best_attempt["grid_debug"]
+            box_check = best_attempt["box_check"]
+            sample_accepted = bool(best_attempt["sample_accepted"])
             cv2.imwrite(str(preview_path), image, [int(cv2.IMWRITE_JPEG_QUALITY), args.jpeg_quality])
             cv2.imwrite(str(image_path), image, [int(cv2.IMWRITE_JPEG_QUALITY), args.jpeg_quality])
-            dot, laser_debug = detect_laser_dot(
-                image,
-                color=args.laser_color,
-                min_area=args.laser_min_area,
-                max_area=args.laser_max_area,
-                roi=roi,
-            )
-            grid_found, grid_points, grid_debug = detect_grid_points(
-                image,
-                spec,
-                blue_hue_low=args.blue_hue_low,
-                blue_hue_high=args.blue_hue_high,
-                min_line_length=args.min_line_length,
-                roi=roi,
-            )
-            box_check = {"box_check": "unknown", "reason": "laser_or_grid_missing"}
-            sample_accepted = False
-            if dot is not None and grid_found:
-                box_check = dot_inside_labeled_box(
-                    spec=spec,
-                    grid_debug=grid_debug,
-                    dot=dot,
-                    region=region,
-                    row=row,
-                    col=col,
-                    margin_px=args.box_margin_px,
-                )
-                sample_accepted = box_check.get("box_check") == "inside"
             sample = {
                 "created_at": datetime.now().isoformat(timespec="seconds"),
                 "image": str(image_path),
@@ -698,6 +741,8 @@ def capture_laser_samples(args: argparse.Namespace) -> None:
                 "laser_debug": laser_debug,
                 "grid_debug": grid_debug,
                 "box_check": box_check,
+                "burst_frames": args.burst_frames,
+                "burst_results": burst_results,
                 "sample_accepted": sample_accepted,
                 "label": args.label,
             }
@@ -984,6 +1029,8 @@ def build_parser() -> argparse.ArgumentParser:
     laser.add_argument("--save-rejected", action="store_true")
     laser.add_argument("--box-margin-px", type=float, default=12.0)
     laser.add_argument("--preview", default="camera_calibration_runs/latest/latest_laser_attempt.jpg")
+    laser.add_argument("--burst-frames", type=int, default=5)
+    laser.add_argument("--burst-interval-sec", type=float, default=0.08)
     laser.add_argument("--jpeg-quality", type=int, default=92)
     add_laser_args(laser)
     add_grid_args(laser)
