@@ -6,12 +6,12 @@ directly to the dog camera while a Raspberry Pi reads the HC-SR04 depth sensor.
 Workflow:
   1. Use YOLO/OpenCV to detect the full-body person box in the dog camera frame.
   2. Use Raspberry Pi GPIO to read distance from the HC-SR04 ultrasonic sensor.
-  3. Estimate height from pixel height, sensor distance, and camera vertical FOV.
-  4. Optional: solve camera vertical FOV once from a known-height reference.
+  3. Estimate height from the person box, sensor distance, and camera calibration.
+  4. Optional fallback: solve camera vertical FOV once from a known-height reference.
 
-The height estimate uses the pinhole-camera relationship:
+The calibrated height estimate uses the same ray geometry as the Measure app:
 
-    height_cm = distance_cm * pixel_height / focal_length_y_px
+    height_cm = distance_cm * (tan(head_ray_angle) - tan(foot_ray_angle))
 
 The distance should be the distance from the camera/sensor plane to the person.
 """
@@ -67,6 +67,50 @@ class FrameDecision:
     guidance: str
 
 
+@dataclass(frozen=True)
+class CameraCalibration:
+    camera_matrix: list[list[float]]
+    distortion_coefficients: list[float]
+    image_width: int | None = None
+    image_height: int | None = None
+    source: str | None = None
+
+
+def load_camera_calibration(path: str | Path) -> CameraCalibration:
+    calibration_path = Path(path)
+    data = json.loads(calibration_path.read_text())
+    if "camera_matrix" not in data:
+        raise RuntimeError(f"Camera calibration is missing camera_matrix: {calibration_path}")
+    if "distortion_coefficients" not in data:
+        raise RuntimeError(f"Camera calibration is missing distortion_coefficients: {calibration_path}")
+    return CameraCalibration(
+        camera_matrix=data["camera_matrix"],
+        distortion_coefficients=data["distortion_coefficients"],
+        image_width=data.get("image_width"),
+        image_height=data.get("image_height"),
+        source=str(calibration_path),
+    )
+
+
+def scaled_camera_matrix_for_image(
+    *,
+    calibration: CameraCalibration,
+    image_width: int,
+    image_height: int,
+):
+    _cv2, np = require_cv2_numpy()
+    camera_matrix = np.asarray(calibration.camera_matrix, dtype=np.float64).copy()
+    if calibration.image_width and calibration.image_height:
+        scale_x = image_width / float(calibration.image_width)
+        scale_y = image_height / float(calibration.image_height)
+        camera_matrix[0, 0] *= scale_x
+        camera_matrix[0, 2] *= scale_x
+        camera_matrix[1, 1] *= scale_y
+        camera_matrix[1, 2] *= scale_y
+    distortion = np.asarray(calibration.distortion_coefficients, dtype=np.float64).reshape(-1, 1)
+    return camera_matrix, distortion
+
+
 def focal_y_px_from_vertical_fov(*, image_height: int, vertical_fov_deg: float) -> float:
     if vertical_fov_deg <= 0.0 or vertical_fov_deg >= 179.0:
         raise ValueError("--vertical-fov-deg must be between 0 and 179 degrees.")
@@ -107,6 +151,74 @@ def estimate_height_from_box_fov(
         "person_height_cm": abs(height_cm),
         "person_height_in": abs(height_cm) / 2.54,
     }
+
+
+def estimate_height_from_box_calibration(
+    *,
+    person: PersonBox,
+    image_width: int,
+    image_height: int,
+    distance_cm: float,
+    calibration: CameraCalibration,
+    camera_pitch_deg: float,
+) -> dict[str, float | str | list[float]]:
+    cv2, np = require_cv2_numpy()
+    camera_matrix, distortion = scaled_camera_matrix_for_image(
+        calibration=calibration,
+        image_width=image_width,
+        image_height=image_height,
+    )
+    sample_points = np.asarray(
+        [
+            [[person.center_x, person.top_y]],
+            [[person.center_x, person.bottom_y]],
+        ],
+        dtype=np.float64,
+    )
+    normalized = cv2.undistortPoints(sample_points, camera_matrix, distortion).reshape(-1, 2)
+    top_norm_y = float(normalized[0][1])
+    bottom_norm_y = float(normalized[1][1])
+    top_ray_deg = camera_pitch_deg + math.degrees(math.atan(-top_norm_y))
+    bottom_ray_deg = camera_pitch_deg + math.degrees(math.atan(-bottom_norm_y))
+    height_cm = distance_cm * (
+        math.tan(math.radians(top_ray_deg)) - math.tan(math.radians(bottom_ray_deg))
+    )
+    return {
+        "height_method": "opencv_camera_calibration",
+        "camera_calibration": calibration.source or "",
+        "camera_pitch_deg": camera_pitch_deg,
+        "top_ray_world_deg": top_ray_deg,
+        "bottom_ray_world_deg": bottom_ray_deg,
+        "top_undistorted_normalized_xy": [float(normalized[0][0]), top_norm_y],
+        "bottom_undistorted_normalized_xy": [float(normalized[1][0]), bottom_norm_y],
+        "focal_length_x_px": float(camera_matrix[0, 0]),
+        "focal_length_y_px": float(camera_matrix[1, 1]),
+        "principal_point_x_px": float(camera_matrix[0, 2]),
+        "principal_point_y_px": float(camera_matrix[1, 2]),
+        "person_height_cm": abs(height_cm),
+        "person_height_in": abs(height_cm) / 2.54,
+    }
+
+
+def estimate_height_from_box(args: argparse.Namespace, *, person: PersonBox, image_width: int, image_height: int, distance_cm: float):
+    if getattr(args, "camera_calibration", None):
+        return estimate_height_from_box_calibration(
+            person=person,
+            image_width=image_width,
+            image_height=image_height,
+            distance_cm=distance_cm,
+            calibration=load_camera_calibration(args.camera_calibration),
+            camera_pitch_deg=args.camera_pitch_deg,
+        )
+    if getattr(args, "vertical_fov_deg", None) is None:
+        raise RuntimeError("Provide --camera-calibration camera_calibration.json, or fallback --vertical-fov-deg.")
+    return estimate_height_from_box_fov(
+        person=person,
+        image_height=image_height,
+        distance_cm=distance_cm,
+        vertical_fov_deg=args.vertical_fov_deg,
+        camera_pitch_deg=args.camera_pitch_deg,
+    )
 
 
 def solve_focal_y_px_from_known_height(
@@ -432,12 +544,12 @@ def select_person_from_image(args: argparse.Namespace) -> tuple[PersonBox, list[
 def estimate_height_simple(args: argparse.Namespace) -> None:
     person, detections, (image_width, image_height) = select_person_from_image(args)
     distance_cm, distance_source = resolve_distance_cm(args)
-    metrics = estimate_height_from_box_fov(
+    metrics = estimate_height_from_box(
+        args,
         person=person,
+        image_width=image_width,
         image_height=image_height,
         distance_cm=distance_cm,
-        vertical_fov_deg=args.vertical_fov_deg,
-        camera_pitch_deg=args.camera_pitch_deg,
     )
     decision = evaluate_person_frame(
         person=person,
@@ -449,11 +561,12 @@ def estimate_height_simple(args: argparse.Namespace) -> None:
         center_tolerance_ratio=args.center_tolerance_ratio,
     )
     result = {
-        "mode": "known_distance_fov",
+        "mode": "known_distance_height",
         "image": args.image,
         "distance_cm": distance_cm,
         "distance_source": distance_source,
         "vertical_fov_deg": args.vertical_fov_deg,
+        "camera_calibration": args.camera_calibration,
         "camera_pitch_deg": args.camera_pitch_deg,
         "person_index": args.person_index,
         "person_box": asdict(person),
@@ -464,8 +577,9 @@ def estimate_height_simple(args: argparse.Namespace) -> None:
         "detections": [asdict(det) for det in detections],
         "note": (
             "Accuracy depends on distance_cm being the ground distance to the "
-            "person plane, camera_pitch_deg matching this frame, and vertical_fov_deg "
-            "matching this camera mode/resolution."
+            "person plane and camera_pitch_deg matching this frame. With "
+            "--camera-calibration, OpenCV intrinsics and lens distortion are used "
+            "instead of the vertical-FOV shortcut."
         ),
     }
     print(json.dumps(result, indent=2))
@@ -554,6 +668,7 @@ def capture_and_estimate_height_simple(args: argparse.Namespace) -> None:
         hcsr04_sample_delay_sec=args.hcsr04_sample_delay_sec,
         hcsr04_max_distance_cm=args.hcsr04_max_distance_cm,
         vertical_fov_deg=args.vertical_fov_deg,
+        camera_calibration=args.camera_calibration,
         camera_pitch_deg=args.camera_pitch_deg,
         yolo_model=args.yolo_model,
         yolo_confidence=args.yolo_confidence,
@@ -592,7 +707,10 @@ def guided_measure_height(args: argparse.Namespace) -> None:
         print("distance_source=hcsr04")
     else:
         print(f"target_distance_cm={args.distance_cm:.1f}")
-    print(f"vertical_fov_deg={args.vertical_fov_deg:.3f}")
+    if args.camera_calibration:
+        print(f"camera_calibration={args.camera_calibration}")
+    elif args.vertical_fov_deg is not None:
+        print(f"vertical_fov_deg={args.vertical_fov_deg:.3f}")
     print(f"camera_pitch_deg={args.camera_pitch_deg:.3f}")
     print("reference=hcsr04_distance_sensor")
 
@@ -632,12 +750,12 @@ def guided_measure_height(args: argparse.Namespace) -> None:
 
         if decision.status == "ok" and person is not None:
             distance_cm, distance_source = resolve_distance_cm(args)
-            metrics = estimate_height_from_box_fov(
+            metrics = estimate_height_from_box(
+                args,
                 person=person,
+                image_width=image_width,
                 image_height=image_height,
                 distance_cm=distance_cm,
-                vertical_fov_deg=args.vertical_fov_deg,
-                camera_pitch_deg=args.camera_pitch_deg,
             )
             result = {
                 "mode": "guided_measure_height",
@@ -645,6 +763,7 @@ def guided_measure_height(args: argparse.Namespace) -> None:
                 "distance_cm": distance_cm,
                 "distance_source": distance_source,
                 "vertical_fov_deg": args.vertical_fov_deg,
+                "camera_calibration": args.camera_calibration,
                 "camera_pitch_deg": args.camera_pitch_deg,
                 "person_index": args.person_index,
                 "person_box": asdict(person),
@@ -732,6 +851,19 @@ def build_parser() -> argparse.ArgumentParser:
             help="Camera tilt for this frame; positive means camera points upward.",
         )
 
+    def add_height_geometry_args(p: argparse.ArgumentParser) -> None:
+        p.add_argument(
+            "--camera-calibration",
+            default=None,
+            help="OpenCV calibration JSON from calibrate-laser. Preferred over --vertical-fov-deg.",
+        )
+        p.add_argument(
+            "--vertical-fov-deg",
+            type=float,
+            default=None,
+            help="Fallback camera vertical FOV when no calibration JSON is available.",
+        )
+
     def add_laser_args(p: argparse.ArgumentParser) -> None:
         p.add_argument("--laser-color", choices=["red", "green"], default="green")
         p.add_argument("--laser-min-area", type=float, default=3.0)
@@ -791,11 +923,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     simple_estimate = sub.add_parser(
         "measure-height",
-        help="Estimate height with YOLO, HC-SR04 distance, and camera vertical FOV.",
+        help="Estimate height with YOLO, distance, and OpenCV calibration.",
     )
     simple_estimate.add_argument("--image", required=True)
     simple_estimate.add_argument("--distance-cm", type=float, default=None, help="Manual test distance in cm.")
-    simple_estimate.add_argument("--vertical-fov-deg", type=float, required=True)
     simple_estimate.add_argument(
         "--manual-box",
         default=None,
@@ -803,6 +934,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     add_hcsr04_args(simple_estimate)
     add_camera_pose_args(simple_estimate)
+    add_height_geometry_args(simple_estimate)
     add_yolo_args(simple_estimate)
     add_frame_quality_args(simple_estimate)
     simple_estimate.set_defaults(func=estimate_height_simple)
@@ -815,9 +947,9 @@ def build_parser() -> argparse.ArgumentParser:
     simple_live.add_argument("--output", default="person_capture.jpg")
     simple_live.add_argument("--jpeg-quality", type=int, default=92)
     simple_live.add_argument("--distance-cm", type=float, default=None, help="Manual test distance in cm.")
-    simple_live.add_argument("--vertical-fov-deg", type=float, required=True)
     add_hcsr04_args(simple_live)
     add_camera_pose_args(simple_live)
+    add_height_geometry_args(simple_live)
     add_yolo_args(simple_live)
     add_frame_quality_args(simple_live)
     simple_live.set_defaults(func=capture_and_estimate_height_simple)
@@ -830,11 +962,11 @@ def build_parser() -> argparse.ArgumentParser:
     guided.add_argument("--output-dir", default="person_measure_runs/latest")
     guided.add_argument("--jpeg-quality", type=int, default=92)
     guided.add_argument("--distance-cm", type=float, default=None, help="Manual test distance in cm.")
-    guided.add_argument("--vertical-fov-deg", type=float, required=True)
     guided.add_argument("--max-attempts", type=int, default=8)
     guided.add_argument("--settle-seconds", type=float, default=1.5)
     add_hcsr04_args(guided)
     add_camera_pose_args(guided)
+    add_height_geometry_args(guided)
     add_yolo_args(guided)
     add_frame_quality_args(guided)
     guided.set_defaults(func=guided_measure_height)
