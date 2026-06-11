@@ -792,7 +792,14 @@ def detect_laser_dot(
         red_rejection = cyan_green - red.astype(np.int16)
         dominance_mask = cv2.inRange(red_rejection, int(min_green_dominance), 255)
         bright_mask = cv2.inRange(cyan_green.astype(np.uint8), int(min_value), 255)
-        mask = cv2.bitwise_and(hsv_mask, cv2.bitwise_and(dominance_mask, bright_mask))
+        green_excess = green.astype(np.int16) - np.maximum(red, blue).astype(np.int16)
+        green_excess_mask = cv2.inRange(green_excess, max(4, int(min_green_dominance // 2)), 255)
+        green_bright_mask = cv2.inRange(green, int(min_value), 255)
+        green_only_mask = cv2.bitwise_and(green_excess_mask, green_bright_mask)
+        mask = cv2.bitwise_or(
+            cv2.bitwise_and(hsv_mask, cv2.bitwise_and(dominance_mask, bright_mask)),
+            green_only_mask,
+        )
     else:
         raise ValueError("laser color must be red or green")
 
@@ -1497,7 +1504,7 @@ def build_parser() -> argparse.ArgumentParser:
     def add_laser_args(p: argparse.ArgumentParser) -> None:
         p.add_argument("--laser-color", choices=["red", "green"], default="green")
         p.add_argument("--laser-min-area", type=float, default=1.0)
-        p.add_argument("--laser-max-area", type=float, default=1800.0)
+        p.add_argument("--laser-max-area", type=float, default=12000.0)
         p.add_argument("--laser-min-saturation", type=int, default=35)
         p.add_argument("--laser-min-value", type=int, default=120)
         p.add_argument("--laser-min-green-dominance", type=int, default=25)
