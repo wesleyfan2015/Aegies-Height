@@ -384,7 +384,7 @@ def dot_inside_labeled_box(
     region: str,
     row: int,
     col: int,
-    margin_px: float = 2.0,
+    margin_px: float = 12.0,
 ) -> dict[str, object]:
     x_lines = [float(value) for value in grid_debug.get("selected_x_lines", [])]
     lower_y_lines = [float(value) for value in grid_debug.get("selected_lower_y_lines", [])]
@@ -414,6 +414,7 @@ def dot_inside_labeled_box(
     )
     return {
         "box_check": "inside" if inside else "outside",
+        "margin_px": margin_px,
         "expected_box_bounds_px": {
             "left": round(left, 2),
             "right": round(right, 2),
@@ -422,6 +423,18 @@ def dot_inside_labeled_box(
         },
         "laser_dot_px": {"x": round(dot.x, 2), "y": round(dot.y, 2)},
     }
+
+
+def box_check_summary(box_check: dict[str, object]) -> str:
+    dot = box_check.get("laser_dot_px")
+    bounds = box_check.get("expected_box_bounds_px")
+    if not isinstance(dot, dict) or not isinstance(bounds, dict):
+        return f"reason={box_check.get('reason', 'none')}"
+    return (
+        f"dot=({dot.get('x')},{dot.get('y')}) "
+        f"bounds=left:{bounds.get('left')} right:{bounds.get('right')} "
+        f"top:{bounds.get('top')} bottom:{bounds.get('bottom')}"
+    )
 
 
 def make_grid_spec(args: argparse.Namespace) -> GridSpec:
@@ -623,6 +636,7 @@ def capture_laser_samples(args: argparse.Namespace) -> None:
                 region=region,
                 row=row,
                 col=col,
+                margin_px=args.box_margin_px,
             )
             sample_accepted = box_check.get("box_check") == "inside"
         sample = {
@@ -652,7 +666,7 @@ def capture_laser_samples(args: argparse.Namespace) -> None:
                 f"sample_{status}={image_path} box={format_box_label(region, row, col)} "
                 f"accepted_count={accepted_count + int(sample_accepted)}/{args.count} "
                 f"laser_detected={str(dot is not None).lower()} grid_found={str(grid_found).lower()} "
-                f"box_check={box_check.get('box_check')}"
+                f"box_check={box_check.get('box_check')} {box_check_summary(box_check)}"
             )
         else:
             image_path.unlink(missing_ok=True)
@@ -660,7 +674,8 @@ def capture_laser_samples(args: argparse.Namespace) -> None:
                 f"sample_rejected=not_saved box={format_box_label(region, row, col)} "
                 f"accepted_count={accepted_count}/{args.count} "
                 f"laser_detected={str(dot is not None).lower()} grid_found={str(grid_found).lower()} "
-                f"box_check={box_check.get('box_check')} grid_reason={grid_debug.get('reason', 'none')}"
+                f"box_check={box_check.get('box_check')} {box_check_summary(box_check)} "
+                f"grid_reason={grid_debug.get('reason', 'none')}"
             )
         if sample_accepted:
             accepted_count += 1
@@ -923,6 +938,7 @@ def build_parser() -> argparse.ArgumentParser:
     laser.add_argument("--box-col", type=int, default=None)
     laser.add_argument("--label", default="")
     laser.add_argument("--save-rejected", action="store_true")
+    laser.add_argument("--box-margin-px", type=float, default=12.0)
     laser.add_argument("--jpeg-quality", type=int, default=92)
     add_laser_args(laser)
     add_grid_args(laser)
