@@ -506,16 +506,22 @@ def shifted_grid_lines(
     return shifted
 
 
+def nearest_line_index(lines: list[float], target_px: float) -> int:
+    if not lines:
+        raise ValueError("cannot choose nearest grid line from an empty line list")
+    sorted_lines = sorted(lines)
+    return min(range(len(sorted_lines)), key=lambda index: abs(sorted_lines[index] - target_px))
+
+
 def rebuild_grid_reference_lines(
     reference: dict[str, object],
     spec: GridSpec,
     *,
     lower_x_line_start_index: int,
     lower_y_line_start_index: int,
+    lower_first_x_px: float | None,
+    lower_first_y_px: float | None,
 ):
-    if lower_x_line_start_index <= 0 and lower_y_line_start_index <= 0:
-        return reference
-
     _, np = require_cv2_numpy()
     rebuilt = dict(reference)
     grid_debug = dict(rebuilt.get("grid_debug") or {})
@@ -524,6 +530,21 @@ def rebuild_grid_reference_lines(
     top_y_lines = [float(value) for value in grid_debug.get("selected_top_extension_y_lines", [])]
     if not x_lines or not lower_y_lines:
         raise RuntimeError("grid_reference is missing selected_x_lines/selected_lower_y_lines")
+
+    if lower_first_x_px is not None:
+        lower_x_line_start_index = nearest_line_index(x_lines, lower_first_x_px)
+    if lower_first_y_px is not None:
+        lower_y_line_start_index = nearest_line_index(lower_y_lines, lower_first_y_px)
+
+    if lower_first_x_px is None and lower_x_line_start_index <= 0 and len(x_lines) >= spec.cols:
+        # The current dog-camera lights-on grid often sees two extra vertical blue
+        # segments left of the real 7x7 lower grid. Those make labels shift by two
+        # columns. The lower grid is the 7 boxes whose first real line is near the
+        # third detected x line, and the final wall-side line is extrapolated.
+        lower_x_line_start_index = 2
+
+    if lower_x_line_start_index <= 0 and lower_y_line_start_index <= 0:
+        return reference
 
     shifted_x_lines = shifted_grid_lines(
         x_lines,
@@ -551,8 +572,11 @@ def rebuild_grid_reference_lines(
     grid_debug["selected_lower_y_lines"] = [round(value, 2) for value in shifted_lower_y_lines]
     grid_debug["lower_x_line_start_index"] = lower_x_line_start_index
     grid_debug["lower_y_line_start_index"] = lower_y_line_start_index
+    grid_debug["lower_first_x_px"] = None if lower_first_x_px is None else round(lower_first_x_px, 2)
+    grid_debug["lower_first_y_px"] = None if lower_first_y_px is None else round(lower_first_y_px, 2)
     grid_debug["rebuilt_from_lights_on_reference"] = True
     points = np.asarray(lower_points + top_points, dtype=np.float32).reshape(-1, 1, 2)
+    rebuilt["grid_debug"] = grid_debug
     rebuilt["grid_points"] = points.tolist()
     rebuilt["grid_point_count"] = int(points.shape[0])
     return rebuilt
@@ -1199,11 +1223,20 @@ def capture_laser_samples(args: argparse.Namespace) -> None:
             spec,
             lower_x_line_start_index=args.lower_x_line_start_index,
             lower_y_line_start_index=args.lower_y_line_start_index,
+            lower_first_x_px=args.lower_first_x_px,
+            lower_first_y_px=args.lower_first_y_px,
         )
         print(f"grid_reference={Path(args.grid_reference).resolve()}")
-        if args.lower_x_line_start_index > 0 or args.lower_y_line_start_index > 0:
-            print(f"lower_x_line_start_index={args.lower_x_line_start_index}")
-            print(f"lower_y_line_start_index={args.lower_y_line_start_index}")
+        if (
+            args.lower_x_line_start_index > 0
+            or args.lower_y_line_start_index > 0
+            or args.lower_first_x_px is not None
+            or args.lower_first_y_px is not None
+        ):
+            print(f"original_x_lines={grid_reference['grid_debug'].get('original_selected_x_lines')}")
+            print(f"original_lower_y_lines={grid_reference['grid_debug'].get('original_selected_lower_y_lines')}")
+            print(f"lower_x_line_start_index={grid_reference['grid_debug'].get('lower_x_line_start_index')}")
+            print(f"lower_y_line_start_index={grid_reference['grid_debug'].get('lower_y_line_start_index')}")
             print(f"corrected_x_lines={grid_reference['grid_debug']['selected_x_lines']}")
             print(f"corrected_lower_y_lines={grid_reference['grid_debug']['selected_lower_y_lines']}")
         if roi is None:
@@ -1639,6 +1672,8 @@ def calibrate_from_laser_samples(args: argparse.Namespace) -> None:
         spec,
         lower_x_line_start_index=args.lower_x_line_start_index,
         lower_y_line_start_index=args.lower_y_line_start_index,
+        lower_first_x_px=args.lower_first_x_px,
+        lower_first_y_px=args.lower_first_y_px,
     )
 
     base_object_points = object_points(spec).reshape(-1, 3)
@@ -1800,6 +1835,18 @@ def build_parser() -> argparse.ArgumentParser:
                 "Manual lights-on reference correction: use this zero-based lower y-line index "
                 "as lower-grid row line 1. Top L-extension y-lines stay unchanged."
             ),
+        )
+        p.add_argument(
+            "--lower-first-x-px",
+            type=float,
+            default=None,
+            help="Optional pixel x value for the first real lower-grid vertical line in the lights-on reference.",
+        )
+        p.add_argument(
+            "--lower-first-y-px",
+            type=float,
+            default=None,
+            help="Optional pixel y value for the first real lower-grid horizontal line in the lights-on reference.",
         )
 
     def add_laser_args(p: argparse.ArgumentParser) -> None:
