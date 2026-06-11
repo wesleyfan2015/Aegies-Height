@@ -579,9 +579,12 @@ def capture_laser_samples(args: argparse.Namespace) -> None:
     print("lower_box_labels_are=1_based_from_top_left_like_1,1")
     print("top_extension_labels_are=Trow,col_like_T1,1")
 
-    for index in range(1, args.count + 1):
+    accepted_count = 0
+    attempt = 0
+    while accepted_count < args.count:
+        attempt += 1
         if args.interactive:
-            raw = input(f"sample {index}/{args.count} box row,col (or q)> ").strip().lower()
+            raw = input(f"sample {accepted_count + 1}/{args.count} box row,col (or q)> ").strip().lower()
             if raw in {"q", "quit", "exit"}:
                 break
             region, row, col = parse_box_label(raw)
@@ -591,7 +594,7 @@ def capture_laser_samples(args: argparse.Namespace) -> None:
             region, row, col = args.box_region, args.box_row, args.box_col
 
         grid_box_center_object_point(spec=spec, row=row, col=col, region=region)
-        image_path = output_dir / f"laser_{int(time.time())}_{index:04d}.jpg"
+        image_path = output_dir / f"laser_{int(time.time())}_{attempt:04d}.jpg"
         capture_one_frame(rtsp_url=args.rtsp_url, output=image_path, jpeg_quality=args.jpeg_quality)
         image = cv2.imread(str(image_path))
         if image is None:
@@ -642,12 +645,25 @@ def capture_laser_samples(args: argparse.Namespace) -> None:
             "sample_accepted": sample_accepted,
             "label": args.label,
         }
-        append_jsonl(samples_path, sample)
-        print(
-            f"sample_saved={image_path} box={format_box_label(region, row, col)} "
-            f"laser_detected={str(dot is not None).lower()} grid_found={str(grid_found).lower()} "
-            f"box_check={box_check.get('box_check')}"
-        )
+        status = "accepted" if sample_accepted else "rejected"
+        if sample_accepted or args.save_rejected:
+            append_jsonl(samples_path, sample)
+            print(
+                f"sample_{status}={image_path} box={format_box_label(region, row, col)} "
+                f"accepted_count={accepted_count + int(sample_accepted)}/{args.count} "
+                f"laser_detected={str(dot is not None).lower()} grid_found={str(grid_found).lower()} "
+                f"box_check={box_check.get('box_check')}"
+            )
+        else:
+            image_path.unlink(missing_ok=True)
+            print(
+                f"sample_rejected=not_saved box={format_box_label(region, row, col)} "
+                f"accepted_count={accepted_count}/{args.count} "
+                f"laser_detected={str(dot is not None).lower()} grid_found={str(grid_found).lower()} "
+                f"box_check={box_check.get('box_check')} grid_reason={grid_debug.get('reason', 'none')}"
+            )
+        if sample_accepted:
+            accepted_count += 1
 
 
 def calibrate_from_images(args: argparse.Namespace) -> None:
@@ -906,6 +922,7 @@ def build_parser() -> argparse.ArgumentParser:
     laser.add_argument("--box-row", type=int, default=None)
     laser.add_argument("--box-col", type=int, default=None)
     laser.add_argument("--label", default="")
+    laser.add_argument("--save-rejected", action="store_true")
     laser.add_argument("--jpeg-quality", type=int, default=92)
     add_laser_args(laser)
     add_grid_args(laser)

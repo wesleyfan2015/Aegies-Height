@@ -347,6 +347,34 @@ python3 examples/vision/grid_laser_calibration.py capture-laser-samples \
   --min-line-length 25
 ```
 
+If the live camera says `laser_detected=true grid_found=false`, the dog may
+still see the grid. It usually means the ROI crop is wrong for the live camera
+position. Stop the command, clean the bad partial run, and use a larger ROI:
+
+```bash
+rm -rf camera_calibration_runs
+
+python3 examples/vision/grid_laser_calibration.py capture-laser-samples \
+  --interactive \
+  --count 50 \
+  --roi 650,380,450,460 \
+  --min-line-length 25
+```
+
+If that still cannot find the grid, test without an ROI:
+
+```bash
+rm -rf camera_calibration_runs
+
+python3 examples/vision/grid_laser_calibration.py capture-laser-samples \
+  --interactive \
+  --count 50 \
+  --min-line-length 25
+```
+
+The script only saves accepted samples by default. Rejected attempts are not
+added to `laser_samples.jsonl`.
+
 When prompted:
 
 ```text

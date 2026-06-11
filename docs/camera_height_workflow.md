@@ -95,6 +95,19 @@ python3 examples/vision/grid_laser_calibration.py capture-laser-samples \
   --min-line-length 25
 ```
 
+If the live stream prints `grid_found=false`, the grid is probably outside the
+ROI crop. Clean the partial run and use a larger ROI:
+
+```bash
+rm -rf camera_calibration_runs
+
+python3 examples/vision/grid_laser_calibration.py capture-laser-samples \
+  --interactive \
+  --count 50 \
+  --roi 650,380,450,460 \
+  --min-line-length 25
+```
+
 Example prompt answer:
 
 ```text
