@@ -4,10 +4,11 @@ This is the command guide for the height-measurement project.
 
 There are two separate work paths:
 
-1. **Calibration path, today**: use the wall grid and laser samples to calibrate the dog camera for accuracy.
-2. **Tilt path, later**: use dog tilt telemetry and camera geometry for a Measure-app style workflow.
+1. **Lens/FOV calibration**: use the wall grid and laser samples to estimate camera intrinsics, FOV, and distortion.
+2. **Pitch/level height path**: use a same-height wall mark, radar/depth distance, and person pixels for the first working height demo.
 
-Today, do the **calibration path** first.
+Current recommendation: use the **pitch/level height path** for the next demo.
+Keep the lens/FOV calibration data as a reference and later correction layer.
 
 ## 0. Project Files
 
@@ -177,9 +178,31 @@ calibrate
 calibrate-laser
 ```
 
-## 5. Today: Wall Grid + Laser Calibration
+## 5. Next Demo: Same-Height Pitch/Level Test
 
-This is the path to do today.
+This is the next path to run.
+
+1. Measure the dog camera lens height from the floor.
+2. Put tape/mark on the wall at exactly the same height.
+3. Put another mark a known distance above or below it, for example 30 cm or 60 cm.
+4. Measure the distance from the dog camera lens to the wall.
+5. Take one lights-on photo from the dog camera.
+6. Use the pixel row of the same-height mark to solve the level/pitch reference.
+7. Use the known vertical span to verify the FOV/angle math.
+
+The old laser/grid work is useful here because it gives a starting vertical FOV:
+
+```text
+vertical_fov_deg ~= 32.5
+```
+
+If this test does not match the known 30 cm or 60 cm wall span, the likely causes
+are distance measurement, camera pitch offset, or FOV estimate.
+
+## 6. Reference: Wall Grid + Laser Calibration
+
+This path was used to estimate camera FOV and distortion. Do not keep collecting
+laser samples unless we decide to redo lens calibration with a better target.
 
 The grid and laser calibration does **not** train AI. It solves camera geometry:
 
@@ -196,7 +219,16 @@ camera_calibration_runs/latest/calibration.json
 That file contains camera intrinsics and distortion coefficients. Later, the
 tilt/height math can use this to be more accurate.
 
-### 5.1 Confirm Grid Measurements
+Current measured estimate from the saved calibration set:
+
+```text
+horizontal_fov_deg ~= 53.5
+vertical_fov_deg   ~= 32.5
+```
+
+Treat these as starting estimates until verified with a known wall measurement.
+
+### 6.1 Confirm Grid Measurements
 
 Before running commands, confirm:
 
@@ -222,7 +254,7 @@ Use `docs/images/l_shape_grid_box_labels.jpg` as the reference image. Lower
 boxes are labeled `1,1` through `8,7`. Top-extension boxes are labeled `T1,1`
 through `T4,2`.
 
-### 5.2 Inspect The Existing Test Image
+### 6.2 Inspect The Existing Test Image
 
 Run:
 
@@ -254,7 +286,7 @@ If `grid_found=false`, check:
 - `--blue-hue-low` / `--blue-hue-high` may need adjustment
 - `--min-line-length` may need adjustment
 
-### 5.3 Capture Grid Images From The Dog Camera
+### 6.3 Capture Grid Images From The Dog Camera
 
 Run this while the dog camera sees the wall grid:
 
@@ -287,7 +319,7 @@ Good result:
 accepted_count should be at least 30
 ```
 
-### 5.4 Calibrate From Grid Images
+### 6.4 Calibrate From Grid Images
 
 Run:
 
@@ -310,7 +342,7 @@ rms_reprojection_error is low
 
 Lower RMS is better. If RMS is high, capture better grid images.
 
-### 5.5 Recommended: Dark-Room Laser Samples With Lights-On Grid Reference
+### 6.5 Recommended: Dark-Room Laser Samples With Lights-On Grid Reference
 
 Use this when the green laser is easier to see in darkness.
 
@@ -371,7 +403,7 @@ T1,1
 In this mode the dark image does not need to show the grid. The script uses the
 saved lights-on grid reference and only detects the green laser.
 
-### 5.6 Fallback: Capture Laser-Labeled Samples With Grid Visible
+### 6.6 Fallback: Capture Laser-Labeled Samples With Grid Visible
 
 This is the assisted calibration step.
 
@@ -483,7 +515,7 @@ If the laser is not detected:
 - lower `--laser-min-value`
 - adjust `--laser-max-area`
 
-### 5.7 Calibrate With Laser Samples
+### 6.7 Calibrate With Laser Samples
 
 Run:
 
@@ -512,7 +544,7 @@ Keep the generated file:
 camera_calibration_runs/latest/calibration.json
 ```
 
-## 6. How To Check If Calibration Is Correct
+## 7. How To Check If Calibration Is Correct
 
 Check the calibration JSON:
 
@@ -547,7 +579,7 @@ Bad signs:
 - the laser dot was labeled with the wrong box number
 - the laser reflected or bloomed too much
 
-## 7. Tilt Path For Later
+## 8. Tilt Path For Later
 
 Do this later, after or separate from calibration.
 
@@ -605,7 +637,7 @@ Saved images:
 tilt_probe_runs/latest/
 ```
 
-## 8. Questions For The Dog Developers
+## 9. Questions For The Dog Developers
 
 Ask:
 
@@ -621,7 +653,7 @@ Ask:
 9. Is there an API to read current camera pitch directly?
 ```
 
-## 9. What To Send Back After Today
+## 10. What To Send Back After Today
 
 Send:
 
