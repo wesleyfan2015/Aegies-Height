@@ -266,6 +266,39 @@ def split_l_shape_y_lines(y_lines: list[float], spec: GridSpec) -> tuple[list[fl
     return best_top, best_lower
 
 
+def filter_x_lines_by_y_overlap(
+    x_lines: list[float],
+    vertical_segments: list[tuple[float, float, float]],
+    y_lines: list[float],
+    *,
+    x_tolerance: float = 22.0,
+    min_overlap_fraction: float = 0.45,
+) -> list[float]:
+    """Keep vertical grid lines that actually run through the detected lower grid rows."""
+    if len(y_lines) < 2:
+        return x_lines
+
+    top = min(y_lines)
+    bottom = max(y_lines)
+    grid_height = max(1.0, bottom - top)
+    min_overlap_px = grid_height * min_overlap_fraction
+    filtered: list[float] = []
+
+    for x_line in sorted(x_lines):
+        overlap = 0.0
+        for x_mid, y1, y2 in vertical_segments:
+            if abs(x_mid - x_line) > x_tolerance:
+                continue
+            segment_top = max(min(y1, y2), top)
+            segment_bottom = min(max(y1, y2), bottom)
+            if segment_bottom > segment_top:
+                overlap += segment_bottom - segment_top
+        if overlap >= min_overlap_px:
+            filtered.append(x_line)
+
+    return filtered
+
+
 def detect_grid_points(
     image,
     spec: GridSpec,
@@ -311,6 +344,7 @@ def detect_grid_points(
         return False, None, {"reason": "no_blue_grid_lines"}
 
     vertical_x: list[float] = []
+    vertical_segments: list[tuple[float, float, float]] = []
     horizontal_y: list[float] = []
     for raw in lines.reshape(-1, 4):
         x1, y1, x2, y2 = [float(v) for v in raw]
@@ -320,7 +354,9 @@ def detect_grid_points(
         if length < min_line_length:
             continue
         if abs(dx) < max(12.0, abs(dy) * 0.25):
-            vertical_x.append((x1 + x2) / 2.0)
+            x_mid = (x1 + x2) / 2.0
+            vertical_x.append(x_mid)
+            vertical_segments.append((x_mid, min(y1, y2), max(y1, y2)))
         elif abs(dy) < max(12.0, abs(dx) * 0.25):
             horizontal_y.append((y1 + y2) / 2.0)
 
@@ -328,8 +364,6 @@ def detect_grid_points(
     y_lines = group_close_values(horizontal_y, tolerance=22.0)
     raw_vertical_count = len(x_lines)
     raw_horizontal_count = len(y_lines)
-    if skip_left_x_lines > 0:
-        x_lines = sorted(x_lines)[skip_left_x_lines:]
 
     needed_y_lines = spec.rows if spec.shape == "rectangle" else spec.rows
     if len(x_lines) < spec.cols or len(y_lines) < needed_y_lines:
@@ -345,9 +379,17 @@ def detect_grid_points(
             },
         )
 
-    x_lines = choose_evenly_spaced_lines(x_lines, spec.cols)
+    filtered_x_lines = x_lines
+    lower_x_filter_used = False
     if spec.shape == "rectangle":
         y_lines = choose_evenly_spaced_lines(y_lines, spec.rows)
+        filtered_x_lines = filter_x_lines_by_y_overlap(x_lines, vertical_segments, y_lines)
+        lower_x_filter_used = len(filtered_x_lines) >= spec.cols
+        if lower_x_filter_used:
+            x_lines = filtered_x_lines
+        if skip_left_x_lines > 0:
+            x_lines = sorted(x_lines)[skip_left_x_lines:]
+        x_lines = choose_evenly_spaced_lines(x_lines, spec.cols)
         points = np.array([[x + offset_x, y + offset_y] for y in y_lines for x in x_lines], dtype=np.float32)
         selected_y_debug = y_lines
         top_y_debug: list[float] = []
@@ -368,6 +410,13 @@ def detect_grid_points(
             inferred_top = True
         else:
             top_y_lines, lower_y_lines = split
+        filtered_x_lines = filter_x_lines_by_y_overlap(x_lines, vertical_segments, lower_y_lines)
+        lower_x_filter_used = len(filtered_x_lines) >= spec.cols
+        if lower_x_filter_used:
+            x_lines = filtered_x_lines
+        if skip_left_x_lines > 0:
+            x_lines = sorted(x_lines)[skip_left_x_lines:]
+        x_lines = choose_evenly_spaced_lines(x_lines, spec.cols)
         extension_x_lines = x_lines[
             spec.top_extension_start_col - 1 : spec.top_extension_start_col + spec.top_extension_cols
         ]
@@ -382,12 +431,14 @@ def detect_grid_points(
         "shape": spec.shape,
         "vertical_lines": len(x_lines),
         "horizontal_lines": len(selected_y_debug) + len(top_y_debug),
-                "raw_vertical_lines": raw_vertical_count,
-                "raw_horizontal_lines": raw_horizontal_count,
-                "skip_left_x_lines": skip_left_x_lines,
-                "hough_threshold": hough_threshold,
-                "roi": roi,
-                "top_extension_y_inferred": spec.shape == "l_shape" and inferred_top,
+        "raw_vertical_lines": raw_vertical_count,
+        "raw_horizontal_lines": raw_horizontal_count,
+        "filtered_vertical_lines": len(filtered_x_lines),
+        "lower_x_filter_used": lower_x_filter_used,
+        "skip_left_x_lines": skip_left_x_lines,
+        "hough_threshold": hough_threshold,
+        "roi": roi,
+        "top_extension_y_inferred": spec.shape == "l_shape" and inferred_top,
         "selected_x_lines": [round(value + offset_x, 2) for value in x_lines],
         "selected_lower_y_lines": [round(value + offset_y, 2) for value in selected_y_debug],
         "selected_top_extension_y_lines": [round(value + offset_y, 2) for value in top_y_debug],
