@@ -624,15 +624,30 @@ def capture_grid_reference(args: argparse.Namespace) -> None:
     if image is None:
         raise RuntimeError(f"OpenCV could not read captured image: {image_path}")
 
+    requested_roi = parse_roi(args.roi)
     found, points, debug = detect_grid_points(
         image,
         spec,
         blue_hue_low=args.blue_hue_low,
         blue_hue_high=args.blue_hue_high,
         min_line_length=args.min_line_length,
-        roi=parse_roi(args.roi),
+        roi=requested_roi,
     )
+    if not found and requested_roi is not None:
+        print(f"grid_reference_roi_failed={json.dumps(debug)}")
+        print("grid_reference_retrying_without_roi=true")
+        found, points, debug = detect_grid_points(
+            image,
+            spec,
+            blue_hue_low=args.blue_hue_low,
+            blue_hue_high=args.blue_hue_high,
+            min_line_length=args.min_line_length,
+            roi=None,
+        )
     if not found or points is None:
+        failure_path = output_path.with_name(output_path.stem + "_failed_image.jpg")
+        write_image_or_raise(failure_path, image, args.jpeg_quality)
+        print(f"grid_reference_failed_image={failure_path.resolve()}")
         raise RuntimeError(f"Grid reference failed: {json.dumps(debug)}")
 
     height, width = image.shape[:2]

@@ -321,7 +321,6 @@ First, keep the lights on and capture the grid reference:
 python3 examples/vision/grid_laser_calibration.py capture-grid-reference \
   --output camera_calibration_runs/latest/grid_reference.json \
   --image-output camera_calibration_runs/latest/grid_reference.jpg \
-  --roi 650,380,450,460 \
   --min-line-length 25
 ```
 
