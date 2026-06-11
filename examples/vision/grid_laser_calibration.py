@@ -482,6 +482,60 @@ def object_points(spec: GridSpec):
     return np.asarray(points, dtype=np.float32)
 
 
+def shifted_grid_x_lines(x_lines: list[float], *, start_index: int, needed_count: int) -> list[float]:
+    if start_index < 0:
+        raise ValueError("--lower-x-line-start-index must be >= 0")
+    if needed_count <= 0:
+        return []
+    shifted = sorted(x_lines)[start_index:]
+    if len(shifted) >= needed_count:
+        return shifted[:needed_count]
+
+    gaps = [shifted[index + 1] - shifted[index] for index in range(len(shifted) - 1)]
+    if not gaps:
+        raise ValueError("not enough x grid lines to shift/rebuild lower grid")
+    gap = sorted(gaps)[len(gaps) // 2]
+    while len(shifted) < needed_count:
+        shifted.append(shifted[-1] + gap)
+    return shifted
+
+
+def rebuild_grid_reference_x_lines(reference: dict[str, object], spec: GridSpec, *, lower_x_line_start_index: int):
+    if lower_x_line_start_index <= 0:
+        return reference
+
+    _, np = require_cv2_numpy()
+    rebuilt = dict(reference)
+    grid_debug = dict(rebuilt.get("grid_debug") or {})
+    x_lines = [float(value) for value in grid_debug.get("selected_x_lines", [])]
+    lower_y_lines = [float(value) for value in grid_debug.get("selected_lower_y_lines", [])]
+    top_y_lines = [float(value) for value in grid_debug.get("selected_top_extension_y_lines", [])]
+    if not x_lines or not lower_y_lines:
+        raise RuntimeError("grid_reference is missing selected_x_lines/selected_lower_y_lines")
+
+    shifted_x_lines = shifted_grid_x_lines(
+        x_lines,
+        start_index=lower_x_line_start_index,
+        needed_count=spec.cols,
+    )
+    lower_points = [[x, y] for y in lower_y_lines for x in shifted_x_lines]
+    top_points: list[list[float]] = []
+    if spec.shape == "l_shape":
+        extension_x_lines = shifted_x_lines[
+            spec.top_extension_start_col - 1 : spec.top_extension_start_col + spec.top_extension_cols
+        ]
+        top_points = [[x, y] for y in top_y_lines for x in extension_x_lines]
+
+    grid_debug["original_selected_x_lines"] = [round(value, 2) for value in x_lines]
+    grid_debug["selected_x_lines"] = [round(value, 2) for value in shifted_x_lines]
+    grid_debug["lower_x_line_start_index"] = lower_x_line_start_index
+    grid_debug["rebuilt_from_lights_on_reference"] = True
+    points = np.asarray(lower_points + top_points, dtype=np.float32).reshape(-1, 1, 2)
+    rebuilt["grid_points"] = points.tolist()
+    rebuilt["grid_point_count"] = int(points.shape[0])
+    return rebuilt
+
+
 def grid_box_center_object_point(*, spec: GridSpec, row: int, col: int, region: str = "lower"):
     _, np = require_cv2_numpy()
     if region == "lower":
@@ -1118,7 +1172,15 @@ def capture_laser_samples(args: argparse.Namespace) -> None:
             "Use the lights-on grid_reference.json so dark laser frames cannot create new columns."
         )
     if grid_reference is not None:
+        grid_reference = rebuild_grid_reference_x_lines(
+            grid_reference,
+            spec,
+            lower_x_line_start_index=args.lower_x_line_start_index,
+        )
         print(f"grid_reference={Path(args.grid_reference).resolve()}")
+        if args.lower_x_line_start_index > 0:
+            print(f"lower_x_line_start_index={args.lower_x_line_start_index}")
+            print(f"corrected_x_lines={grid_reference['grid_debug']['selected_x_lines']}")
         if roi is None:
             roi = roi_from_grid_points(
                 grid_reference["grid_points"],
@@ -1547,6 +1609,11 @@ def calibrate_from_laser_samples(args: argparse.Namespace) -> None:
             "calibrate-laser requires --grid-reference. "
             "Use the lights-on grid_reference.json; sample images must not redetect grid columns."
         )
+    cli_grid_reference = rebuild_grid_reference_x_lines(
+        cli_grid_reference,
+        spec,
+        lower_x_line_start_index=args.lower_x_line_start_index,
+    )
 
     base_object_points = object_points(spec).reshape(-1, 3)
     object_sets = []
@@ -1563,7 +1630,7 @@ def calibrate_from_laser_samples(args: argparse.Namespace) -> None:
             continue
         height, width = image.shape[:2]
         image_size = (width, height)
-        grid_points = cli_grid_reference["grid_points"]
+        grid_points = np.asarray(cli_grid_reference["grid_points"], dtype=np.float32)
         grid_debug = cli_grid_reference["grid_debug"]
         laser_dot = sample.get("laser_dot")
         if not isinstance(laser_dot, dict):
@@ -1689,6 +1756,15 @@ def build_parser() -> argparse.ArgumentParser:
             type=int,
             default=0,
             help="Ignore this many detected vertical blue lines from the left before numbering grid columns.",
+        )
+        p.add_argument(
+            "--lower-x-line-start-index",
+            type=int,
+            default=0,
+            help=(
+                "Manual lights-on reference correction: use this zero-based x-line index "
+                "as lower-grid line 1, then number lower boxes from there."
+            ),
         )
 
     def add_laser_args(p: argparse.ArgumentParser) -> None:
