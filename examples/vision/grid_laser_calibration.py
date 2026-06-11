@@ -9,6 +9,7 @@ import argparse
 import itertools
 import json
 import math
+import os
 import time
 from dataclasses import asdict, dataclass
 from datetime import datetime
@@ -16,6 +17,7 @@ from pathlib import Path
 
 
 DEFAULT_RTSP_URL = "rtsp://192.168.234.1:8554/test"
+DEFAULT_FFMPEG_CAPTURE_OPTIONS = "rtsp_transport;tcp|stimeout;3000000|rw_timeout;3000000|max_delay;500000"
 
 
 @dataclass(frozen=True)
@@ -115,11 +117,17 @@ def write_image_or_raise(path: Path, image, jpeg_quality: int | None = None) -> 
         raise RuntimeError(f"Could not write image: {path}")
 
 
+def log_step(message: str) -> None:
+    print(f"[{datetime.now().isoformat(timespec='seconds')}] {message}", flush=True)
+
+
 def open_camera(rtsp_url: str):
     cv2, _ = require_cv2_numpy()
+    os.environ.setdefault("OPENCV_FFMPEG_CAPTURE_OPTIONS", DEFAULT_FFMPEG_CAPTURE_OPTIONS)
     cap = cv2.VideoCapture(rtsp_url, cv2.CAP_FFMPEG)
     if not cap.isOpened():
         raise RuntimeError(f"Could not open dog camera stream: {rtsp_url}")
+    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
     return cap
 
 
@@ -150,6 +158,11 @@ def read_camera_frame(cap, *, reconnect_url: str | None = None):
     if not ok or frame is None:
         raise RuntimeError(f"Could not read a frame from dog camera: {reconnect_url}")
     return cap, frame
+
+
+def flush_camera_frames(cap, count: int) -> None:
+    for _ in range(max(0, count)):
+        cap.grab()
 
 
 def group_close_values(values: list[float], tolerance: float) -> list[float]:
@@ -592,6 +605,8 @@ def detect_laser_dot(
     min_area: float,
     max_area: float,
     roi: tuple[int, int, int, int] | None = None,
+    min_saturation: int = 35,
+    min_value: int = 45,
 ) -> tuple[LaserDot | None, dict[str, object]]:
     cv2, np = require_cv2_numpy()
     working = image
@@ -610,11 +625,11 @@ def detect_laser_dot(
 
     hsv = cv2.cvtColor(working, cv2.COLOR_BGR2HSV)
     if color == "red":
-        mask1 = cv2.inRange(hsv, np.array([0, 50, 70]), np.array([14, 255, 255]))
-        mask2 = cv2.inRange(hsv, np.array([165, 50, 70]), np.array([179, 255, 255]))
+        mask1 = cv2.inRange(hsv, np.array([0, min_saturation, min_value]), np.array([16, 255, 255]))
+        mask2 = cv2.inRange(hsv, np.array([162, min_saturation, min_value]), np.array([179, 255, 255]))
         mask = cv2.bitwise_or(mask1, mask2)
     elif color == "green":
-        mask = cv2.inRange(hsv, np.array([35, 40, 60]), np.array([95, 255, 255]))
+        mask = cv2.inRange(hsv, np.array([35, min_saturation, min_value]), np.array([95, 255, 255]))
     else:
         raise ValueError("laser color must be red or green")
 
@@ -642,7 +657,13 @@ def detect_laser_dot(
         )
 
     if not candidates:
-        return None, {"reason": "laser_not_detected", "contours": len(contours), "roi": roi}
+        return None, {
+            "reason": "laser_not_detected",
+            "contours": len(contours),
+            "roi": roi,
+            "min_saturation": min_saturation,
+            "min_value": min_value,
+        }
     score, dot = max(candidates, key=lambda item: item[0])
     return dot, {"laser_candidates": len(candidates), "laser_score": round(score, 2), "roi": roi}
 
@@ -783,16 +804,29 @@ def capture_laser_samples(args: argparse.Namespace) -> None:
             cached_grid_found = False
             cached_grid_points = None
             cached_grid_debug: dict[str, object] | None = None
+            log_step(f"attempt={attempt} label={format_box_label(region, row, col)} capture_start")
+            if args.flush_frames > 0:
+                log_step(f"attempt={attempt} flushing_frames={args.flush_frames}")
+                flush_camera_frames(cap, args.flush_frames)
             for burst_index in range(1, args.burst_frames + 1):
+                log_step(f"attempt={attempt} burst={burst_index}/{args.burst_frames} reading_camera")
                 cap, image = read_camera_frame(cap, reconnect_url=args.rtsp_url)
+                log_step(f"attempt={attempt} burst={burst_index}/{args.burst_frames} frame_read")
                 dot, laser_debug = detect_laser_dot(
                     image,
                     color=args.laser_color,
                     min_area=args.laser_min_area,
                     max_area=args.laser_max_area,
                     roi=roi,
+                    min_saturation=args.laser_min_saturation,
+                    min_value=args.laser_min_value,
+                )
+                log_step(
+                    f"attempt={attempt} burst={burst_index}/{args.burst_frames} "
+                    f"laser_detected={str(dot is not None).lower()}"
                 )
                 if cached_grid_debug is None or (not cached_grid_found and burst_index <= args.grid_retry_frames):
+                    log_step(f"attempt={attempt} burst={burst_index}/{args.burst_frames} grid_detect_start")
                     grid_found, grid_points, grid_debug = detect_grid_points(
                         image,
                         spec,
@@ -804,6 +838,10 @@ def capture_laser_samples(args: argparse.Namespace) -> None:
                     cached_grid_found = grid_found
                     cached_grid_points = grid_points
                     cached_grid_debug = grid_debug
+                    log_step(
+                        f"attempt={attempt} burst={burst_index}/{args.burst_frames} "
+                        f"grid_detect_done grid_found={str(grid_found).lower()}"
+                    )
                 else:
                     grid_found = cached_grid_found
                     grid_points = cached_grid_points
@@ -863,6 +901,7 @@ def capture_laser_samples(args: argparse.Namespace) -> None:
             sample_accepted = bool(best_attempt["sample_accepted"])
             raw_attempt_path = debug_attempt_dir / f"attempt_{attempt:04d}_raw.jpg"
             debug_attempt_path = debug_attempt_dir / f"attempt_{attempt:04d}_debug.jpg"
+            log_step(f"attempt={attempt} writing_images")
             write_image_or_raise(preview_path, image, args.jpeg_quality)
             write_image_or_raise(raw_attempt_path, image, args.jpeg_quality)
             write_image_or_raise(image_path, image, args.jpeg_quality)
@@ -908,6 +947,7 @@ def capture_laser_samples(args: argparse.Namespace) -> None:
                 box_check=box_check,
                 label=format_box_label(region, row, col),
             )
+            log_step(f"attempt={attempt} images_written")
             prune_old_files(debug_attempt_dir, "attempt_*_raw.jpg", args.keep_debug_attempts)
             prune_old_files(debug_attempt_dir, "attempt_*_debug.jpg", args.keep_debug_attempts)
             files_written = (
@@ -1173,8 +1213,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     def add_laser_args(p: argparse.ArgumentParser) -> None:
         p.add_argument("--laser-color", choices=["red", "green"], default="red")
-        p.add_argument("--laser-min-area", type=float, default=3.0)
+        p.add_argument("--laser-min-area", type=float, default=1.0)
         p.add_argument("--laser-max-area", type=float, default=1800.0)
+        p.add_argument("--laser-min-saturation", type=int, default=35)
+        p.add_argument("--laser-min-value", type=int, default=45)
 
     inspect = sub.add_parser("inspect-grid", help="Check grid detection in one image.")
     inspect.add_argument("--image", default="test_camera.jpg")
@@ -1210,6 +1252,7 @@ def build_parser() -> argparse.ArgumentParser:
     laser.add_argument("--burst-frames", type=int, default=5)
     laser.add_argument("--burst-interval-sec", type=float, default=0.08)
     laser.add_argument("--grid-retry-frames", type=int, default=2)
+    laser.add_argument("--flush-frames", type=int, default=6)
     laser.add_argument("--jpeg-quality", type=int, default=92)
     add_laser_args(laser)
     add_grid_args(laser)
