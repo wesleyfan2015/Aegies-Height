@@ -696,6 +696,7 @@ def detect_laser_dot(
     roi: tuple[int, int, int, int] | None = None,
     min_saturation: int = 35,
     min_value: int = 45,
+    min_green_dominance: int = 25,
 ) -> tuple[LaserDot | None, dict[str, object]]:
     cv2, np = require_cv2_numpy()
     working = image
@@ -721,9 +722,9 @@ def detect_laser_dot(
         hsv_mask = cv2.inRange(hsv, np.array([35, min_saturation, min_value]), np.array([95, 255, 255]))
         blue, green, red = cv2.split(working)
         green_dominance = green.astype(np.int16) - np.maximum(red, blue).astype(np.int16)
-        dominance_mask = cv2.inRange(green_dominance, int(min_saturation), 255)
+        dominance_mask = cv2.inRange(green_dominance, int(min_green_dominance), 255)
         bright_mask = cv2.inRange(green, int(min_value), 255)
-        mask = cv2.bitwise_or(hsv_mask, cv2.bitwise_and(dominance_mask, bright_mask))
+        mask = cv2.bitwise_and(hsv_mask, cv2.bitwise_and(dominance_mask, bright_mask))
     else:
         raise ValueError("laser color must be red or green")
 
@@ -757,6 +758,7 @@ def detect_laser_dot(
             "roi": roi,
             "min_saturation": min_saturation,
             "min_value": min_value,
+            "min_green_dominance": min_green_dominance,
         }
     score, dot = max(candidates, key=lambda item: item[0])
     return dot, {"laser_candidates": len(candidates), "laser_score": round(score, 2), "roi": roi}
@@ -793,6 +795,7 @@ def inspect_laser(args: argparse.Namespace) -> None:
         roi=parse_roi(args.roi),
         min_saturation=args.laser_min_saturation,
         min_value=args.laser_min_value,
+        min_green_dominance=args.laser_min_green_dominance,
     )
     overlay = image.copy()
     roi = parse_roi(args.roi)
@@ -969,6 +972,7 @@ def capture_laser_samples(args: argparse.Namespace) -> None:
                     roi=roi,
                     min_saturation=args.laser_min_saturation,
                     min_value=args.laser_min_value,
+                    min_green_dominance=args.laser_min_green_dominance,
                 )
                 log_step(
                     f"attempt={attempt} burst={burst_index}/{args.burst_frames} "
@@ -1381,6 +1385,7 @@ def build_parser() -> argparse.ArgumentParser:
         p.add_argument("--laser-max-area", type=float, default=1800.0)
         p.add_argument("--laser-min-saturation", type=int, default=35)
         p.add_argument("--laser-min-value", type=int, default=45)
+        p.add_argument("--laser-min-green-dominance", type=int, default=25)
 
     inspect = sub.add_parser("inspect-grid", help="Check grid detection in one image.")
     inspect.add_argument("--image", default="test_camera.jpg")
