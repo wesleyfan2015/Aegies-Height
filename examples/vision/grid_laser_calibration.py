@@ -160,9 +160,10 @@ def read_camera_frame(cap, *, reconnect_url: str | None = None):
     return cap, frame
 
 
-def flush_camera_frames(cap, count: int) -> None:
+def flush_camera_frames(cap, count: int, *, reconnect_url: str):
     for _ in range(max(0, count)):
-        cap.grab()
+        cap, _frame = read_camera_frame(cap, reconnect_url=reconnect_url)
+    return cap
 
 
 def group_close_values(values: list[float], tolerance: float) -> list[float]:
@@ -629,7 +630,12 @@ def detect_laser_dot(
         mask2 = cv2.inRange(hsv, np.array([162, min_saturation, min_value]), np.array([179, 255, 255]))
         mask = cv2.bitwise_or(mask1, mask2)
     elif color == "green":
-        mask = cv2.inRange(hsv, np.array([35, min_saturation, min_value]), np.array([95, 255, 255]))
+        hsv_mask = cv2.inRange(hsv, np.array([35, min_saturation, min_value]), np.array([95, 255, 255]))
+        blue, green, red = cv2.split(working)
+        green_dominance = green.astype(np.int16) - np.maximum(red, blue).astype(np.int16)
+        dominance_mask = cv2.inRange(green_dominance, int(min_saturation), 255)
+        bright_mask = cv2.inRange(green, int(min_value), 255)
+        mask = cv2.bitwise_or(hsv_mask, cv2.bitwise_and(dominance_mask, bright_mask))
     else:
         raise ValueError("laser color must be red or green")
 
@@ -807,7 +813,7 @@ def capture_laser_samples(args: argparse.Namespace) -> None:
             log_step(f"attempt={attempt} label={format_box_label(region, row, col)} capture_start")
             if args.flush_frames > 0:
                 log_step(f"attempt={attempt} flushing_frames={args.flush_frames}")
-                flush_camera_frames(cap, args.flush_frames)
+                cap = flush_camera_frames(cap, args.flush_frames, reconnect_url=args.rtsp_url)
             for burst_index in range(1, args.burst_frames + 1):
                 log_step(f"attempt={attempt} burst={burst_index}/{args.burst_frames} reading_camera")
                 cap, image = read_camera_frame(cap, reconnect_url=args.rtsp_url)
@@ -1252,7 +1258,7 @@ def build_parser() -> argparse.ArgumentParser:
     laser.add_argument("--burst-frames", type=int, default=5)
     laser.add_argument("--burst-interval-sec", type=float, default=0.08)
     laser.add_argument("--grid-retry-frames", type=int, default=2)
-    laser.add_argument("--flush-frames", type=int, default=6)
+    laser.add_argument("--flush-frames", type=int, default=0)
     laser.add_argument("--jpeg-quality", type=int, default=92)
     add_laser_args(laser)
     add_grid_args(laser)
