@@ -1566,7 +1566,12 @@ def build_parser() -> argparse.ArgumentParser:
     laser.add_argument("--burst-frames", type=int, default=5)
     laser.add_argument("--burst-interval-sec", type=float, default=0.08)
     laser.add_argument("--grid-retry-frames", type=int, default=2)
-    laser.add_argument("--flush-frames", type=int, default=0)
+    laser.add_argument(
+        "--flush-frames",
+        type=int,
+        default=12,
+        help="Discard this many buffered frames after each label before detecting the laser.",
+    )
     laser.add_argument(
         "--capture-timeout-sec",
         type=float,
