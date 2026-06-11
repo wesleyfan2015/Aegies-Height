@@ -404,6 +404,14 @@ def dot_inside_labeled_box(
     x_lines = [float(value) for value in grid_debug.get("selected_x_lines", [])]
     lower_y_lines = [float(value) for value in grid_debug.get("selected_lower_y_lines", [])]
     top_y_lines = [float(value) for value in grid_debug.get("selected_top_extension_y_lines", [])]
+    suggested_box = suggested_box_for_dot(
+        spec=spec,
+        x_lines=x_lines,
+        lower_y_lines=lower_y_lines,
+        top_y_lines=top_y_lines,
+        dot=dot,
+        margin_px=margin_px,
+    )
 
     if region == "lower":
         grid_box_center_object_point(spec=spec, row=row, col=col, region=region)
@@ -437,7 +445,48 @@ def dot_inside_labeled_box(
             "bottom": round(bottom, 2),
         },
         "laser_dot_px": {"x": round(dot.x, 2), "y": round(dot.y, 2)},
+        "suggested_box": suggested_box,
     }
+
+
+def interval_index(value: float, lines: list[float], *, margin_px: float = 0.0) -> int | None:
+    for index in range(len(lines) - 1):
+        left = min(lines[index], lines[index + 1]) - margin_px
+        right = max(lines[index], lines[index + 1]) + margin_px
+        if left <= value <= right:
+            return index
+    return None
+
+
+def suggested_box_for_dot(
+    *,
+    spec: GridSpec,
+    x_lines: list[float],
+    lower_y_lines: list[float],
+    top_y_lines: list[float],
+    dot: LaserDot,
+    margin_px: float,
+) -> str | None:
+    x_index = interval_index(dot.x, x_lines, margin_px=margin_px)
+    if x_index is None:
+        return None
+
+    lower_y_index = interval_index(dot.y, lower_y_lines, margin_px=margin_px)
+    if lower_y_index is not None:
+        row = lower_y_index + 1
+        col = x_index + 1
+        if 1 <= row <= spec.box_rows and 1 <= col <= spec.box_cols:
+            return format_box_label("lower", row, col)
+
+    top_y_index = interval_index(dot.y, top_y_lines, margin_px=margin_px)
+    if top_y_index is not None and spec.shape == "l_shape":
+        start_index = spec.top_extension_start_col - 1
+        top_col = x_index - start_index + 1
+        row = top_y_index + 1
+        if 1 <= row <= spec.top_extension_rows and 1 <= top_col <= spec.top_extension_cols:
+            return format_box_label("top_extension", row, top_col)
+
+    return None
 
 
 def box_check_summary(box_check: dict[str, object]) -> str:
@@ -445,10 +494,13 @@ def box_check_summary(box_check: dict[str, object]) -> str:
     bounds = box_check.get("expected_box_bounds_px")
     if not isinstance(dot, dict) or not isinstance(bounds, dict):
         return f"reason={box_check.get('reason', 'none')}"
+    suggestion = box_check.get("suggested_box")
+    suggestion_text = f" suggested_box={suggestion}" if suggestion else ""
     return (
         f"dot=({dot.get('x')},{dot.get('y')}) "
         f"bounds=left:{bounds.get('left')} right:{bounds.get('right')} "
         f"top:{bounds.get('top')} bottom:{bounds.get('bottom')}"
+        f"{suggestion_text}"
     )
 
 
